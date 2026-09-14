@@ -91,7 +91,7 @@ function attach(pi) {
 
   pi.on("agent_start", () => {
     const state = getClientState(pi);
-    if (!state || state.closed) return;
+    if (!state?.secret || state.closed) return;
     state.agentActivity = { startedAt: Date.now(), turnIndex: 0, phase: "Thinking" };
     updateLiveStatus(state);
     scheduleStatusHeartbeat(state);
@@ -139,7 +139,7 @@ function attach(pi) {
   pi.on("message_start", (event) => {
     if (event.message?.role !== "assistant") return;
     const state = getClientState(pi);
-    if (!state || state.closed) return;
+    if (!state?.secret || state.closed) return;
     const stream = ensureStatusStream(state);
     stream.text = assistantText(event.message);
     const text = streamDraftText(stream);
