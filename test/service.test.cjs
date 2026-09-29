@@ -1,11 +1,11 @@
 const assert = require("node:assert/strict");
 const { execFileSync, spawn, spawnSync } = require("node:child_process");
-const { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { WINDOWS_DAEMON_MARKER, launchAgent, proxyEnvironment, systemdUnit, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml } = require("../service.cjs");
+const { WINDOWS_DAEMON_MARKER, launchAgent, proxyEnvironment, systemdUnit, writePrivateFile, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml } = require("../service.cjs");
 
 test("stops only the exact Windows daemon process without killing its Pi children", () => {
   const script = windowsDaemonStopScript("C:\\different checkout\\daemon.cjs");
@@ -128,4 +128,18 @@ test("builds a keep-alive macOS LaunchAgent with escaped paths", () => {
   assert.match(plist, /\/opt\/homebrew\/bin:\/usr\/bin/);
   assert.match(plist, /<key>KeepAlive<\/key><true\/>/);
   assert.match(plist, /<key>AbandonProcessGroup<\/key><true\/>/);
+});
+
+test("replaces service definitions with an owner-only file", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "pi-telegram-service-file-"));
+  try {
+    const file = path.join(directory, "unit.service");
+    writeFileSync(file, "old", { mode: 0o644 });
+    writePrivateFile(file, "new");
+    assert.equal(readFileSync(file, "utf8"), "new");
+    if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(directory), ["unit.service"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

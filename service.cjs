@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execFileSync } = require("node:child_process");
-const { chmodSync, mkdirSync, rmSync, writeFileSync } = require("node:fs");
+const { mkdirSync, renameSync, rmSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { daemonLogPath } = require("./src/service/daemon-log.cjs");
@@ -67,10 +67,16 @@ function systemdQuote(value) {
   return JSON.stringify(String(value)).replace(/%/g, "%%");
 }
 
-// Service definitions may hold proxy credentials, so keep them owner-only.
+// Service definitions may hold proxy credentials, so they are never readable
+// by others, not even briefly: write a fresh 0600 file and rename it into place.
 function writePrivateFile(file, content) {
-  writeFileSync(file, content, { mode: 0o600 });
-  chmodSync(file, 0o600);
+  const temporary = `${file}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, content, { mode: 0o600, flag: "wx" });
+    renameSync(temporary, file);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
 function systemdUnit(nodePath = process.execPath, daemonPath = DAEMON_PATH, agentDir = AGENT_DIR, environmentPath = process.env.PATH || "", proxy = proxyEnvironment()) {
@@ -120,7 +126,9 @@ function installLinux() {
   mkdirSync(path.dirname(file), { recursive: true });
   writePrivateFile(file, systemdUnit());
   run("systemctl", ["--user", "daemon-reload"]);
-  run("systemctl", ["--user", "enable", "--now", SERVICE_NAME]);
+  run("systemctl", ["--user", "enable", SERVICE_NAME]);
+  // restart (not enable --now) so a running daemon picks up the new unit and environment.
+  run("systemctl", ["--user", "restart", SERVICE_NAME]);
 }
 
 function uninstallLinux() {
@@ -190,4 +198,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ WINDOWS_DAEMON_MARKER, launchAgent, proxyEnvironment, systemdUnit, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml });
+module.exports = Object.freeze({ WINDOWS_DAEMON_MARKER, launchAgent, proxyEnvironment, writePrivateFile, systemdUnit, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml });
