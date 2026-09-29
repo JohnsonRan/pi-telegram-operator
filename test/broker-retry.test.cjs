@@ -5,8 +5,11 @@ const path = require("node:path");
 const test = require("node:test");
 
 // Broker helpers persist state under the agent directory; keep it out of $HOME.
-process.env.PI_CODING_AGENT_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "pi-telegram-retry-"));
+const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-telegram-retry-"));
+process.env.PI_CODING_AGENT_DIR = agentDir;
 const { __test: broker } = require("../src/broker/server.cjs");
+
+test.after(() => fs.rmSync(agentDir, { recursive: true, force: true }));
 
 test("retries a rejected reply delivery to the reconnected session", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
