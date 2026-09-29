@@ -201,6 +201,7 @@ Set these wherever Pi and setup are started. For the background service:
 | "No active Pi session is available" | You wrote in All Topics without wake mode. Reply inside a session topic instead. |
 | Replies say "queued until the target Pi session reconnects" | That session isn't running. Open it in Pi, or enable wake mode. |
 | Every notification arrives twice | If you use `pi-notify`, remove its Telegram command action. TelegraPi already reads its notifications. |
+| Wake or `/update` fails on Windows with `ENOENT` or `EINVAL` | `wakePiCommand` is started without a shell, so an npm `pi.cmd` shim can't run. Set `wakePiCommand` to `node.exe` and `wakePiCommandArgs` to the full path of Pi's `dist/cli.js` (or point it at a real `pi.exe`). |
 | Setup says the broker is running | Close all Pi sessions and stop the service, then rerun setup. |
 | Service misbehaves after an update | Restart it with `service.cjs stop` and `start`, then check `status` and the log file. |
 
