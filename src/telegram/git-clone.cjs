@@ -47,6 +47,8 @@ function cloneWithGit(remote, destination, cwd) {
   return new Promise((resolve, reject) => {
     execFile("git", ["clone", "--", remote, destination], {
       cwd,
+      // Nobody can answer a credential prompt from Telegram; fail fast instead.
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" },
       windowsHide: true,
       timeout: CLONE_TIMEOUT_MS,
       maxBuffer: 4 * 1024 * 1024,
