@@ -11,7 +11,6 @@ const STATE_ENTRY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 async function readBrokerState(statePath = STATE_PATH) {
   try {
     const raw = JSON.parse(await readFile(statePath, "utf8"));
-    const generation = Number.isSafeInteger(raw?.generation) && raw.generation >= 0 ? raw.generation : 0;
     const offset = Number.isSafeInteger(raw?.offset) && raw.offset >= 0 ? raw.offset : 0;
     const mappings = Array.isArray(raw?.mappings)
       ? raw.mappings
@@ -27,9 +26,9 @@ async function readBrokerState(statePath = STATE_PATH) {
     const topics = Array.isArray(raw?.topics)
       ? raw.topics.filter((item) => item && typeof item.sessionId === "string" && Number.isSafeInteger(item.threadId)).slice(-MAX_TOPICS)
       : [];
-    return { generation, offset, mappings, pendingReplies, pendingQuestions, topics };
+    return { offset, mappings, pendingReplies, pendingQuestions, topics };
   } catch (error) {
-    if (error?.code === "ENOENT") return { generation: 0, offset: 0, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] };
+    if (error?.code === "ENOENT") return { offset: 0, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] };
     if (error instanceof SyntaxError) throw new Error(`Telegram state contains invalid JSON: ${statePath}`, { cause: error });
     throw error;
   }
@@ -46,14 +45,13 @@ async function writeStateFile(statePath, content) {
 }
 
 async function persistBrokerState(state, statePath = STATE_PATH) {
-  state.generation = (Number.isSafeInteger(state.generation) ? state.generation : 0) + 1;
   const mappings = [...state.mappings.values()].slice(-MAX_MAPPINGS);
   const pendingReplies = [...state.pendingReplies.values()]
     .slice(-MAX_PENDING_REPLIES)
     .map(({ retryTimer: _retryTimer, ...item }) => item);
   const pendingQuestions = [...(state.pendingQuestions?.values?.() || [])].slice(-MAX_PENDING_QUESTIONS);
   const topics = [...state.topics.values()].slice(-MAX_TOPICS);
-  const content = `${JSON.stringify({ generation: state.generation, offset: state.offset, mappings, pendingReplies, pendingQuestions, topics }, null, 2)}\n`;
+  const content = `${JSON.stringify({ offset: state.offset, mappings, pendingReplies, pendingQuestions, topics }, null, 2)}\n`;
   await writeStateFile(statePath, content);
 }
 

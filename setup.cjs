@@ -103,7 +103,6 @@ async function mergePreviousInstallation(config, state, selected, read = readFil
   preserveOperationalConfig(config, previousConfig);
   if (previousState) {
     state = {
-      generation: Math.max(Number(state.generation) || 0, Number(previousState.generation) || 0),
       offset: Math.max(state.offset, Number(previousState.offset) || 0),
       mappings: Array.isArray(previousState.mappings) ? previousState.mappings : [],
       pendingReplies: Array.isArray(previousState.pendingReplies) ? previousState.pendingReplies : [],
@@ -198,7 +197,7 @@ async function main() {
       wakePiCommandArgs: [],
       wakeOpenTerminal: true,
     };
-    let state = { generation: 0, offset, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] };
+    let state = { offset, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] };
     ({ config, state } = await mergePreviousInstallation(config, state, selected));
     // The endpoint setup just verified wins over a preserved one.
     if (process.env.TELEGRAM_API_BASE_URL) config.apiBaseUrl = apiBaseUrl;

@@ -73,7 +73,6 @@ test("persists and reads only the canonical broker state", async () => {
     await persistBrokerState(state, paths.statePath);
     assert.deepEqual(await readdir(paths.directory), ["pi-telegram-operator.state.json"]);
     const stored = await readBrokerState(paths.statePath);
-    assert.equal(stored.generation, 1);
     assert.equal(stored.offset, 12);
   } finally {
     await rm(paths.directory, { recursive: true, force: true });

@@ -102,19 +102,18 @@ test("rerunning setup preserves pending Telegram questions", async () => {
 
 test("rerunning setup preserves canonical state", async () => {
   const config = { chatId: 42, allowedUserId: 42, port: 43871 };
-  const state = { generation: 0, offset: 0, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] };
+  const state = { offset: 0, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] };
   const pendingReply = { deliveryId: "current", sessionId: "a", text: "one" };
   const read = async (file) => {
     if (file.endsWith("pi-telegram-operator.json")) return JSON.stringify(config);
     if (file.endsWith("pi-telegram-operator.state.json")) {
-      return JSON.stringify({ generation: 3, offset: 9, mappings: [], pendingReplies: [pendingReply], pendingQuestions: [], topics: [] });
+      return JSON.stringify({ offset: 9, mappings: [], pendingReplies: [pendingReply], pendingQuestions: [], topics: [] });
     }
     const error = new Error("missing");
     error.code = "ENOENT";
     throw error;
   };
   const merged = await mergePreviousInstallation(config, state, { chat: { id: 42 }, from: { id: 42 } }, read);
-  assert.equal(merged.state.generation, 3);
   assert.equal(merged.state.offset, 9);
   assert.deepEqual(merged.state.pendingReplies, [pendingReply]);
 });
