@@ -143,6 +143,19 @@ function preferredSplitIndex(source) {
   return Math.max(1, midpoint);
 }
 
+// Returns the opening fence line when source ends inside an unclosed code block.
+function unclosedFence(source) {
+  let open;
+  for (const line of source.split("\n")) {
+    if (open) {
+      if (/^\s*```\s*$/.test(line)) open = undefined;
+    } else if (/^\s*```\s*([^`]*)$/.test(line)) {
+      open = line.trim();
+    }
+  }
+  return open;
+}
+
 function splitMarkdown(value, renderedLimit = MAX_SOURCE_CHARS) {
   const source = String(value ?? "");
   if (!source) return [""];
@@ -150,15 +163,17 @@ function splitMarkdown(value, renderedLimit = MAX_SOURCE_CHARS) {
   if (source.length === 1) return [source];
 
   const index = preferredSplitIndex(source);
-  const left = source.slice(0, index).replace(/\n$/, "");
-  const right = source.slice(index).replace(/^\n/, "");
+  let left = source.slice(0, index).replace(/\n$/, "");
+  let right = source.slice(index).replace(/^\n/, "");
   if (!left || !right) {
     const midpoint = Math.max(1, Math.floor(source.length / 2));
-    return [
-      ...splitMarkdown(source.slice(0, midpoint), renderedLimit),
-      ...splitMarkdown(source.slice(midpoint), renderedLimit),
-    ];
+    left = source.slice(0, midpoint);
+    right = source.slice(midpoint);
   }
+  // Reopen a code block cut in half so the tail still renders as code;
+  // renderTelegramHtml closes the unterminated head on its own.
+  const fence = unclosedFence(left);
+  if (fence) right = `${fence}\n${right}`;
   return [
     ...splitMarkdown(left, renderedLimit),
     ...splitMarkdown(right, renderedLimit),

@@ -47,6 +47,20 @@ test("keeps rendered chunks paired with their plain-text fallback", () => {
   assert.ok(chunks.every((chunk) => chunk.html === renderTelegramHtml(chunk.source)));
 });
 
+test("keeps both halves of a split code block rendered as code", () => {
+  const code = Array.from({ length: 400 }, (_, index) => `const value${index} = a * b * c; // _x_`).join("\n");
+  const chunks = renderTelegramChunkPairs(`Intro\n\n\`\`\`js\n${code}\n\`\`\`\n\nOutro **done**`);
+  assert.ok(chunks.length >= 3);
+  const codeChunks = chunks.filter((chunk) => chunk.source.includes("const value"));
+  assert.ok(codeChunks.length >= 2);
+  for (const chunk of codeChunks) {
+    assert.match(chunk.html, /<pre><code class="language-js">/);
+    assert.doesNotMatch(chunk.html, /```|<i>/);
+  }
+  assert.match(chunks[chunks.length - 1].html, /Outro <b>done<\/b>/);
+  assert.ok(chunks.every((chunk) => renderedTextLength(chunk.html) <= 3500));
+});
+
 test("rejects unsafe links and chunks by rendered Telegram length", () => {
   assert.equal(safeUrl("javascript:alert(1)"), undefined);
   assert.equal(safeUrl("tg://resolve?domain=unsafe"), undefined);
