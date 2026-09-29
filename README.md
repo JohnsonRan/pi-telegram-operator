@@ -94,6 +94,18 @@ Example non-secret configuration:
 
 `apiBaseUrl` defaults to `https://api.telegram.org`. Point it at a reverse proxy, mirror, or self-hosted [Bot API server](https://github.com/tdlib/telegram-bot-api) (for example `http://127.0.0.1:8081`) when the official endpoint is unreachable. The bot token is sent to this URL, so only use endpoints you trust. The server's `--local` mode is not supported because it returns local file paths instead of downloadable files. To run setup itself through a custom endpoint, set `TELEGRAM_API_BASE_URL` for that run; setup stores it as `apiBaseUrl`.
 
+### HTTP proxy
+
+Node's built-in `fetch` ignores `HTTP_PROXY`/`HTTPS_PROXY` unless `NODE_USE_ENV_PROXY=1` is also set (Node 22.21+ or 24+). Set all of them in the environment that starts Pi, setup, or the daemon:
+
+```bash
+export NODE_USE_ENV_PROXY=1
+export HTTPS_PROXY=http://127.0.0.1:7890
+export NO_PROXY=localhost,127.0.0.1
+```
+
+The localhost broker bridge is a raw TCP socket and never uses the proxy; keep `127.0.0.1` in `NO_PROXY` if `apiBaseUrl` points at a local Bot API server. On macOS and Linux, `service.cjs install` copies these variables from the installing shell into the LaunchAgent or systemd unit, so rerun `install` after changing them; credentials in a proxy URL are then stored in that service file. On Windows the Scheduled Task uses your user environment variables, so set them with `setx` (or System Properties) and restart the service.
+
 ## Wake daemon
 
 Set `wakeMode` to `true` to let Telegram start Pi when no interactive Pi process owns the target session. `wakeDefaultCwd` is used by `/new | <prompt>`, and every requested working directory must resolve inside one of the `wakeAllowedRoots`. Symbolic links and junctions are resolved before the allowlist check.

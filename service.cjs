@@ -16,6 +16,14 @@ const MAC_LABEL = "com.johnsonran.pi-telegram-operator";
 const DAEMON_PATH = path.join(__dirname, "daemon.cjs");
 const WINDOWS_DAEMON_LAUNCHER_PATH = path.join(__dirname, "daemon-windows.vbs");
 
+const PROXY_ENV_KEYS = ["NODE_USE_ENV_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"];
+
+// Proxy variables present at install time, baked into the unit because
+// service managers do not inherit the installing shell's environment.
+function proxyEnvironment(environment = process.env) {
+  return Object.fromEntries(PROXY_ENV_KEYS.filter((key) => environment[key]).map((key) => [key, environment[key]]));
+}
+
 function run(command, args, options = {}) {
   return execFileSync(command, args, { encoding: "utf8", stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit" });
 }
@@ -53,12 +61,14 @@ function windowsTaskXml(
   return `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>${xml(userId)}</UserId></LogonTrigger></Triggers>\n<Principals><Principal id="Author"><UserId>${xml(userId)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>\n<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowStartOnDemand>true</AllowStartOnDemand><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure></Settings>\n<Actions Context="Author"><Exec><Command>${xml(wscriptPath)}</Command><Arguments>${xml(argumentsText)}</Arguments><WorkingDirectory>${xml(path.dirname(daemonPath))}</WorkingDirectory></Exec></Actions>\n</Task>\n`;
 }
 
-function systemdUnit(nodePath = process.execPath, daemonPath = DAEMON_PATH, agentDir = AGENT_DIR, environmentPath = process.env.PATH || "") {
-  return `[Unit]\nDescription=TelegraPi Telegram operator for Pi\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart=${JSON.stringify(nodePath)} ${JSON.stringify(daemonPath)}\nEnvironment=${JSON.stringify(`PI_CODING_AGENT_DIR=${agentDir}`)}\nEnvironment=${JSON.stringify(`PATH=${environmentPath}`)}\nPassEnvironment=DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR\nRestart=always\nRestartSec=3\nKillMode=process\n\n[Install]\nWantedBy=default.target\n`;
+function systemdUnit(nodePath = process.execPath, daemonPath = DAEMON_PATH, agentDir = AGENT_DIR, environmentPath = process.env.PATH || "", proxy = proxyEnvironment()) {
+  const proxyLines = Object.entries(proxy).map(([key, value]) => `Environment=${JSON.stringify(`${key}=${value}`)}\n`).join("");
+  return `[Unit]\nDescription=TelegraPi Telegram operator for Pi\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart=${JSON.stringify(nodePath)} ${JSON.stringify(daemonPath)}\nEnvironment=${JSON.stringify(`PI_CODING_AGENT_DIR=${agentDir}`)}\nEnvironment=${JSON.stringify(`PATH=${environmentPath}`)}\n${proxyLines}PassEnvironment=DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR\nRestart=always\nRestartSec=3\nKillMode=process\n\n[Install]\nWantedBy=default.target\n`;
 }
 
-function launchAgent(nodePath = process.execPath, daemonPath = DAEMON_PATH, agentDir = AGENT_DIR, environmentPath = process.env.PATH || "") {
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${MAC_LABEL}</string>\n<key>ProgramArguments</key><array><string>${xml(nodePath)}</string><string>${xml(daemonPath)}</string></array>\n<key>EnvironmentVariables</key><dict><key>PI_CODING_AGENT_DIR</key><string>${xml(agentDir)}</string><key>PATH</key><string>${xml(environmentPath)}</string></dict>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><true/>\n<key>AbandonProcessGroup</key><true/>\n</dict></plist>\n`;
+function launchAgent(nodePath = process.execPath, daemonPath = DAEMON_PATH, agentDir = AGENT_DIR, environmentPath = process.env.PATH || "", proxy = proxyEnvironment()) {
+  const proxyEntries = Object.entries(proxy).map(([key, value]) => `<key>${xml(key)}</key><string>${xml(value)}</string>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>${MAC_LABEL}</string>\n<key>ProgramArguments</key><array><string>${xml(nodePath)}</string><string>${xml(daemonPath)}</string></array>\n<key>EnvironmentVariables</key><dict><key>PI_CODING_AGENT_DIR</key><string>${xml(agentDir)}</string><key>PATH</key><string>${xml(environmentPath)}</string>${proxyEntries}</dict>\n<key>RunAtLoad</key><true/>\n<key>KeepAlive</key><true/>\n<key>AbandonProcessGroup</key><true/>\n</dict></plist>\n`;
 }
 
 function stopWindowsDaemonProcesses() {
@@ -168,4 +178,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = Object.freeze({ WINDOWS_DAEMON_MARKER, launchAgent, systemdUnit, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml });
+module.exports = Object.freeze({ WINDOWS_DAEMON_MARKER, launchAgent, proxyEnvironment, systemdUnit, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml });

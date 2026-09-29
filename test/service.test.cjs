@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { WINDOWS_DAEMON_MARKER, launchAgent, systemdUnit, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml } = require("../service.cjs");
+const { WINDOWS_DAEMON_MARKER, launchAgent, proxyEnvironment, systemdUnit, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml } = require("../service.cjs");
 
 test("stops only the exact Windows daemon process without killing its Pi children", () => {
   const script = windowsDaemonStopScript("C:\\different checkout\\daemon.cjs");
@@ -107,6 +107,16 @@ test("builds a restartable Linux systemd user unit", () => {
   assert.match(unit, /Restart=always/);
   assert.match(unit, /KillMode=process/);
   assert.match(unit, /WantedBy=default\.target/);
+});
+
+test("forwards install-time proxy variables into service definitions", () => {
+  const proxy = proxyEnvironment({ HTTPS_PROXY: "http://proxy:8080", NODE_USE_ENV_PROXY: "1", NO_PROXY: "", HOME: "/home/me" });
+  assert.deepEqual(proxy, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: "http://proxy:8080" });
+  const unit = systemdUnit("/usr/bin/node", "/d.cjs", "/agent", "/usr/bin", proxy);
+  assert.match(unit, /Environment="NODE_USE_ENV_PROXY=1"\nEnvironment="HTTPS_PROXY=http:\/\/proxy:8080"\nPassEnvironment/);
+  const plist = launchAgent("/usr/bin/node", "/d.cjs", "/agent", "/usr/bin", { HTTPS_PROXY: "http://u:p&q@proxy:8080" });
+  assert.match(plist, /<key>HTTPS_PROXY<\/key><string>http:\/\/u:p&amp;q@proxy:8080<\/string><\/dict>/);
+  assert.doesNotMatch(systemdUnit("/n", "/d", "/a", "/p", {}), /PROXY/);
 });
 
 test("builds a keep-alive macOS LaunchAgent with escaped paths", () => {
