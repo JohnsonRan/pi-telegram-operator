@@ -51,3 +51,15 @@ test("reports an abnormal wake exit in the session topic", async (t) => {
   assert.equal(calls[0].body.message_thread_id, 7);
   assert.match(calls[0].body.text, /code 2[\s\S]*boom/);
 });
+
+test("rejects unauthenticated frames and ignores unknown message types", () => {
+  const destroyed = [];
+  const client = { registered: true, socket: { destroyed: false, destroy: (error) => destroyed.push(error.message), write() {} } };
+  const state = { secret: { bridgeSecret: "secret" } };
+  for (const type of ["unknown", "constructor", "__proto__", "toString"]) {
+    broker.handleBrokerRequest(state, client, { auth: "secret", type });
+  }
+  assert.deepEqual(destroyed, []);
+  broker.handleBrokerRequest(state, client, { auth: "wrong", type: "notify" });
+  assert.deepEqual(destroyed, ["Telegram bridge authentication failed"]);
+});

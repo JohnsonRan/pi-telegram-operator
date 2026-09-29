@@ -165,160 +165,178 @@ function trackTask(state, promise) {
   return task;
 }
 
-function handleBrokerRequest(state, client, message) {
-  if (!message || message.auth !== state.secret.bridgeSecret) {
-    client.socket.destroy(new Error("Telegram bridge authentication failed"));
+function handleRegister(state, client, message) {
+  if (message.version !== PROTOCOL_VERSION || typeof message.clientId !== "string" || typeof message.sessionId !== "string") {
+    client.socket.destroy(new Error("Invalid Telegram bridge registration"));
     return;
   }
-  if (message.type === "register") {
-    if (message.version !== PROTOCOL_VERSION || typeof message.clientId !== "string" || typeof message.sessionId !== "string") {
-      client.socket.destroy(new Error("Invalid Telegram bridge registration"));
-      return;
+  client.clientId = message.clientId;
+  client.sessionId = message.sessionId;
+  client.cwd = typeof message.cwd === "string" ? message.cwd : "";
+  client.sessionName = typeof message.sessionName === "string" ? message.sessionName : "";
+  client.wakeChild = message.wakeChild === true;
+  client.commands = normalizePiCommands(message.commands);
+  const previousCommands = state.sessionCommands.get(client.sessionId);
+  const commandsChanged = JSON.stringify(previousCommands || []) !== JSON.stringify(client.commands);
+  state.sessionCommands.set(client.sessionId, client.commands);
+  const topic = state.topics.get(client.sessionId);
+  if (topic) {
+    const topicChanged = topic.cwd !== client.cwd || topic.sessionName !== client.sessionName;
+    if (topicChanged) {
+      topic.cwd = client.cwd;
+      topic.sessionName = client.sessionName;
     }
-    client.clientId = message.clientId;
-    client.sessionId = message.sessionId;
-    client.cwd = typeof message.cwd === "string" ? message.cwd : "";
-    client.sessionName = typeof message.sessionName === "string" ? message.sessionName : "";
-    client.wakeChild = message.wakeChild === true;
-    client.commands = normalizePiCommands(message.commands);
-    const previousCommands = state.sessionCommands.get(client.sessionId);
-    const commandsChanged = JSON.stringify(previousCommands || []) !== JSON.stringify(client.commands);
-    state.sessionCommands.set(client.sessionId, client.commands);
-    const topic = state.topics.get(client.sessionId);
-    if (topic) {
-      const topicChanged = topic.cwd !== client.cwd || topic.sessionName !== client.sessionName;
-      if (topicChanged) {
-        topic.cwd = client.cwd;
-        topic.sessionName = client.sessionName;
-      }
-      if (commandsChanged) {
-        topic.commands = client.commands;
-        syncTelegramCommandMenu(state).catch(warn("Cannot sync bot commands"));
-      }
-      if (topicChanged || commandsChanged) queuePersist(state).catch(() => {});
-      updateDashboard(state, topic, { phase: "Connected", detail: client.sessionName || "Pi session connected" });
+    if (commandsChanged) {
+      topic.commands = client.commands;
+      syncTelegramCommandMenu(state).catch(warn("Cannot sync bot commands"));
     }
-    client.registered = true;
-    if (!client.wakeChild && state.wakeReservations.has(client.sessionId)) {
-      state.wakeLauncher.cancel(client.sessionId);
-      state.wakeReservations.delete(client.sessionId);
-    }
-    for (const [registeredSessionId, registeredClient] of state.clientsBySession) {
-      if (registeredClient === client && registeredSessionId !== client.sessionId) state.clientsBySession.delete(registeredSessionId);
-    }
-    const previous = state.clientsBySession.get(client.sessionId);
-    if (previous && previous !== client) previous.socket.destroy();
-    state.clients.set(client.clientId, client);
-    state.clientsBySession.set(client.sessionId, client);
-    sendLine(client.socket, { type: "registered", version: PROTOCOL_VERSION });
-    for (const question of state.pendingQuestions.values()) {
-      if (question.clientId === client.clientId && question.sessionId === client.sessionId && typeof question.answer === "string") {
-        sendSuccess(client, question.requestId, { questionId: question.questionId, answer: question.answer });
-      }
-    }
-    if (client.wakeChild) deliverPendingForSession(state, client.sessionId);
-    else releaseWakeFollowups(state, client.sessionId);
-    return;
+    if (topicChanged || commandsChanged) queuePersist(state).catch(() => {});
+    updateDashboard(state, topic, { phase: "Connected", detail: client.sessionName || "Pi session connected" });
   }
-  if (message.type === "questionAck" && client.registered && typeof message.questionId === "string") {
-    const question = state.pendingQuestions.get(message.questionId);
-    if (question?.sessionId === client.sessionId && question.clientId === client.clientId) {
-      state.pendingQuestions.delete(message.questionId);
-      queuePersist(state).catch(warn("Cannot persist question ACK"));
+  client.registered = true;
+  if (!client.wakeChild && state.wakeReservations.has(client.sessionId)) {
+    state.wakeLauncher.cancel(client.sessionId);
+    state.wakeReservations.delete(client.sessionId);
+  }
+  for (const [registeredSessionId, registeredClient] of state.clientsBySession) {
+    if (registeredClient === client && registeredSessionId !== client.sessionId) state.clientsBySession.delete(registeredSessionId);
+  }
+  const previous = state.clientsBySession.get(client.sessionId);
+  if (previous && previous !== client) previous.socket.destroy();
+  state.clients.set(client.clientId, client);
+  state.clientsBySession.set(client.sessionId, client);
+  sendLine(client.socket, { type: "registered", version: PROTOCOL_VERSION });
+  for (const question of state.pendingQuestions.values()) {
+    if (question.clientId === client.clientId && question.sessionId === client.sessionId && typeof question.answer === "string") {
+      sendSuccess(client, question.requestId, { questionId: question.questionId, answer: question.answer });
     }
-    return;
   }
-  if (message.type === "replyAck" && client.registered && typeof message.deliveryId === "string") {
-    const pending = state.pendingReplies.get(message.deliveryId);
-    if (!pending || pending.sessionId !== client.sessionId) return;
-    if (message.ok === true) {
-      if (pending.retryTimer) clearTimeout(pending.retryTimer);
-      state.pendingReplies.delete(message.deliveryId);
-      for (const [messageId, mapping] of state.mappings) {
-        if (messageId === pending.notificationMessageId ||
-            (mapping.sessionId === pending.sessionId &&
-             (!pending.threadId || mapping.threadId === pending.threadId) &&
-             mapping.createdAt <= pending.createdAt)) {
-          state.mappings.delete(messageId);
-        }
-      }
-      queuePersist(state).catch(warn("Cannot persist reply ACK"));
-    } else {
-      schedulePendingRetry(state, pending);
-    }
-    return;
-  }
-  if (message.type === "streamDraft") {
-    trackTask(state, handleStreamRequest(state, client, message)).catch(warn("Draft stream failed"));
-    return;
-  }
-  if (message.type === "streamFinal") {
-    if (typeof message.requestId !== "string") return;
-    trackTask(state, handleStreamRequest(state, client, message)).then(() => {
-      if (client.wakeChild) releaseWakeFollowups(state, client.sessionId);
-      sendSuccess(client, message.requestId);
-    }).catch((error) => {
-      sendFailure(client, message.requestId, error);
-    });
-    return;
-  }
-  if (message.type === "question" && client.registered && typeof message.requestId === "string") {
-    const options = Array.isArray(message.options) ? message.options.map(String).filter(Boolean).slice(0, 10) : [];
-    if (options.length === 0) {
-      sendFailure(client, message.requestId, "Question has no selectable options");
-      return;
-    }
-    const questionId = randomUUID();
-    trackTask(state, withTopicRetry(state, client.sessionId, client.cwd, client.sessionName, async (topic) => {
-      const sent = await telegramCall(state.secret, "sendMessage", {
-        chat_id: state.secret.chatId,
-        message_thread_id: topic.threadId,
-        text: String(message.question || "Pi needs your input").slice(0, 3000),
-        reply_markup: questionKeyboard(questionId, options),
-      });
-      state.pendingQuestions.set(questionId, {
-        questionId,
-        requestId: message.requestId,
-        clientId: client.clientId,
-        sessionId: client.sessionId,
-        threadId: topic.threadId,
-        messageId: sent.message_id,
-        question: String(message.question || "Pi needs your input").slice(0, 3000),
-        options,
-        createdAt: Date.now(),
-      });
-      while (state.pendingQuestions.size > MAX_PENDING_QUESTIONS) state.pendingQuestions.delete(state.pendingQuestions.keys().next().value);
-      await queuePersist(state);
-      updateDashboard(state, topic, { phase: "Waiting for answer", detail: String(message.question || "Pi needs your input") });
-      return sent;
-    })).catch((error) => {
-      sendFailure(client, message.requestId, error);
-    });
-    return;
-  }
-  if (message.type === "artifact" && client.registered && typeof message.requestId === "string") {
-    const topic = state.topics.get(client.sessionId);
-    if (!topic) {
-      sendFailure(client, message.requestId, "No Telegram topic exists for this session");
-      return;
-    }
-    sendTopicChatAction(state, topic, "upload_document").catch(() => {});
-    updateDashboard(state, topic, { phase: "Uploading artifact", detail: String(message.path || "") });
-    trackTask(state, sendSessionArtifact(state.secret, { ...topic, cwd: client.cwd }, String(message.path || ""), String(message.caption || ""))).then((sent) => {
-      updateDashboard(state, topic, { phase: "Ready", detail: "Artifact sent" });
-      sendSuccess(client, message.requestId, { messageId: sent.message_id });
-    }).catch((error) => {
-      sendFailure(client, message.requestId, error);
-    });
-    return;
-  }
-  if (message.type !== "notify" || !client.registered || typeof message.requestId !== "string") return;
+  if (client.wakeChild) deliverPendingForSession(state, client.sessionId);
+  else releaseWakeFollowups(state, client.sessionId);
+}
 
+function handleQuestionAck(state, client, message) {
+  if (!(client.registered && typeof message.questionId === "string")) return;
+  const question = state.pendingQuestions.get(message.questionId);
+  if (question?.sessionId === client.sessionId && question.clientId === client.clientId) {
+    state.pendingQuestions.delete(message.questionId);
+    queuePersist(state).catch(warn("Cannot persist question ACK"));
+  }
+}
+
+function handleReplyAck(state, client, message) {
+  if (!(client.registered && typeof message.deliveryId === "string")) return;
+  const pending = state.pendingReplies.get(message.deliveryId);
+  if (!pending || pending.sessionId !== client.sessionId) return;
+  if (message.ok === true) {
+    if (pending.retryTimer) clearTimeout(pending.retryTimer);
+    state.pendingReplies.delete(message.deliveryId);
+    for (const [messageId, mapping] of state.mappings) {
+      if (messageId === pending.notificationMessageId ||
+          (mapping.sessionId === pending.sessionId &&
+           (!pending.threadId || mapping.threadId === pending.threadId) &&
+           mapping.createdAt <= pending.createdAt)) {
+        state.mappings.delete(messageId);
+      }
+    }
+    queuePersist(state).catch(warn("Cannot persist reply ACK"));
+  } else {
+    schedulePendingRetry(state, pending);
+  }
+}
+
+function handleStreamDraft(state, client, message) {
+  trackTask(state, handleStreamRequest(state, client, message)).catch(warn("Draft stream failed"));
+}
+
+function handleStreamFinal(state, client, message) {
+  if (typeof message.requestId !== "string") return;
+  trackTask(state, handleStreamRequest(state, client, message)).then(() => {
+    if (client.wakeChild) releaseWakeFollowups(state, client.sessionId);
+    sendSuccess(client, message.requestId);
+  }).catch((error) => {
+    sendFailure(client, message.requestId, error);
+  });
+}
+
+function handleQuestion(state, client, message) {
+  if (!(client.registered && typeof message.requestId === "string")) return;
+  const options = Array.isArray(message.options) ? message.options.map(String).filter(Boolean).slice(0, 10) : [];
+  if (options.length === 0) {
+    sendFailure(client, message.requestId, "Question has no selectable options");
+    return;
+  }
+  const questionId = randomUUID();
+  trackTask(state, withTopicRetry(state, client.sessionId, client.cwd, client.sessionName, async (topic) => {
+    const sent = await telegramCall(state.secret, "sendMessage", {
+      chat_id: state.secret.chatId,
+      message_thread_id: topic.threadId,
+      text: String(message.question || "Pi needs your input").slice(0, 3000),
+      reply_markup: questionKeyboard(questionId, options),
+    });
+    state.pendingQuestions.set(questionId, {
+      questionId,
+      requestId: message.requestId,
+      clientId: client.clientId,
+      sessionId: client.sessionId,
+      threadId: topic.threadId,
+      messageId: sent.message_id,
+      question: String(message.question || "Pi needs your input").slice(0, 3000),
+      options,
+      createdAt: Date.now(),
+    });
+    while (state.pendingQuestions.size > MAX_PENDING_QUESTIONS) state.pendingQuestions.delete(state.pendingQuestions.keys().next().value);
+    await queuePersist(state);
+    updateDashboard(state, topic, { phase: "Waiting for answer", detail: String(message.question || "Pi needs your input") });
+    return sent;
+  })).catch((error) => {
+    sendFailure(client, message.requestId, error);
+  });
+}
+
+function handleArtifact(state, client, message) {
+  if (!(client.registered && typeof message.requestId === "string")) return;
+  const topic = state.topics.get(client.sessionId);
+  if (!topic) {
+    sendFailure(client, message.requestId, "No Telegram topic exists for this session");
+    return;
+  }
+  sendTopicChatAction(state, topic, "upload_document").catch(() => {});
+  updateDashboard(state, topic, { phase: "Uploading artifact", detail: String(message.path || "") });
+  trackTask(state, sendSessionArtifact(state.secret, { ...topic, cwd: client.cwd }, String(message.path || ""), String(message.caption || ""))).then((sent) => {
+    updateDashboard(state, topic, { phase: "Ready", detail: "Artifact sent" });
+    sendSuccess(client, message.requestId, { messageId: sent.message_id });
+  }).catch((error) => {
+    sendFailure(client, message.requestId, error);
+  });
+}
+
+function handleNotify(state, client, message) {
+  if (!client.registered || typeof message.requestId !== "string") return;
   trackTask(state, sendNotification(state, client, message)).then((sent) => {
     sendSuccess(client, message.requestId, { messageId: sent.message_id });
   }).catch((error) => {
     sendFailure(client, message.requestId, error);
   });
+}
+
+const BROKER_HANDLERS = new Map(Object.entries({
+  register: handleRegister,
+  questionAck: handleQuestionAck,
+  replyAck: handleReplyAck,
+  streamDraft: handleStreamDraft,
+  streamFinal: handleStreamFinal,
+  question: handleQuestion,
+  artifact: handleArtifact,
+  notify: handleNotify,
+}));
+
+function handleBrokerRequest(state, client, message) {
+  if (!message || message.auth !== state.secret.bridgeSecret) {
+    client.socket.destroy(new Error("Telegram bridge authentication failed"));
+    return;
+  }
+  BROKER_HANDLERS.get(message.type)?.(state, client, message);
 }
 
 function closeLeader(state) {
@@ -475,5 +493,5 @@ async function startLocalLeader(secret) {
 module.exports = Object.freeze({
   closeLeader,
   startLocalLeader,
-  __test: Object.freeze({ enqueueStream, reportWakeExit, schedulePendingRetry, ...telegramRouterTest }),
+  __test: Object.freeze({ enqueueStream, handleBrokerRequest, reportWakeExit, schedulePendingRetry, ...telegramRouterTest }),
 });
