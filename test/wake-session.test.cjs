@@ -9,7 +9,13 @@ const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-telegram-wake-session
 process.env.PI_CODING_AGENT_DIR = agentDir;
 const { __test: router } = require("../src/telegram/router.cjs");
 
-test.after(() => fs.rmSync(agentDir, { recursive: true, force: true }));
+// launchWakeSession starts state writes it does not await; let them finish
+// before removing the directory, or rmSync races the final rename.
+const states = [];
+test.after(async () => {
+  await Promise.allSettled(states.map((state) => state.persistQueue));
+  fs.rmSync(agentDir, { recursive: true, force: true });
+});
 
 // plan: one entry per launch() call, each { started, foreground, terminal, throws, registers }.
 // registers: the launched Pi connects to the broker as a wake child.
@@ -38,8 +44,12 @@ function fakeLauncher(plan, { cancelStops = true, runningAfterLaunch = true } = 
 
 function wakeState(t, launcher, { wakeOpenTerminal = true, connected = false } = {}) {
   const notices = [];
+  // foregroundStartups size while each notice is sent: a non-empty set would
+  // make reportWakeExit ignore a background crash during that notice.
+  const foregroundAtNotice = [];
   t.mock.method(global, "fetch", async (_url, init) => {
     notices.push(JSON.parse(init.body).text);
+    foregroundAtNotice.push(state.foregroundStartups.size);
     return new Response(JSON.stringify({ ok: true, result: { message_id: notices.length } }));
   });
   const topic = { sessionId: "11111111-1111-4111-8111-111111111111", threadId: 9, name: "demo", cwd: agentDir };
@@ -58,7 +68,8 @@ function wakeState(t, launcher, { wakeOpenTerminal = true, connected = false } =
   };
   if (connected) state.clientsBySession.set(topic.sessionId, wakeClient(false));
   launcher.onRegister = () => state.clientsBySession.set(topic.sessionId, wakeClient());
-  return { state, topic, notices };
+  states.push(state);
+  return { state, topic, notices, foregroundAtNotice };
 }
 
 function wakeClient(wakeChild = true) {
@@ -94,16 +105,9 @@ test("starts a background wake session without terminal checks", async (t) => {
 
 test("reports background exits as soon as a terminal is unavailable", async (t) => {
   const launcher = fakeLauncher([{ fallbackReason: "no supported terminal emulator was found" }]);
-  const { state, topic, notices } = wakeState(t, launcher);
-  let foregroundDuringNotice;
-  global.fetch = async () => {
-    foregroundDuringNotice = state.foregroundStartups.size;
-    notices.push("sent");
-    return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
-  };
+  const { state, topic, foregroundAtNotice } = wakeState(t, launcher);
   await router.launchWakeSession(state, topic, "hello");
-  // A non-empty set here would make reportWakeExit ignore a crash during the notice.
-  assert.equal(foregroundDuringNotice, 0);
+  assert.deepEqual(foregroundAtNotice, [0]);
 });
 
 test("keeps a foreground terminal that registers and stays running", async (t) => {
@@ -121,12 +125,13 @@ test("keeps a foreground terminal that registers and stays running", async (t) =
 test("falls back to background when the terminal never connects", async (t) => {
   enableTimers(t);
   const launcher = fakeLauncher([{ foreground: true, terminal: "xterm" }, { started: true }]);
-  const { state, topic, notices } = wakeState(t, launcher);
+  const { state, topic, notices, foregroundAtNotice } = wakeState(t, launcher);
   const launched = await drive(t, router.launchWakeSession(state, topic, "hello"));
   assert.equal(launched.foreground, false);
   assert.equal(launcher.cancels, 1);
   assert.equal(launcher.launches[1].openTerminal, false);
   assert.match(notices[1], /Terminal did not connect; switched to background mode/);
+  assert.deepEqual(foregroundAtNotice, [1, 0]);
   assert.equal(state.wakeReservations.has(topic.sessionId), true);
   assert.equal(state.foregroundStartups.size, 0);
 });
@@ -134,10 +139,11 @@ test("falls back to background when the terminal never connects", async (t) => {
 test("falls back to background when the terminal exits after registering", async (t) => {
   enableTimers(t);
   const launcher = fakeLauncher([{ foreground: true, registers: true }, { started: true }], { runningAfterLaunch: false });
-  const { state, topic, notices } = wakeState(t, launcher);
+  const { state, topic, notices, foregroundAtNotice } = wakeState(t, launcher);
   await drive(t, router.launchWakeSession(state, topic, "hello"));
   assert.equal(launcher.launches.length, 2);
   assert.match(notices[1], /Terminal exited during startup; switched to background mode/);
+  assert.deepEqual(foregroundAtNotice, [1, 0]);
   assert.equal(state.foregroundStartups.size, 0);
 });
 
