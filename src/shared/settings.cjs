@@ -40,6 +40,8 @@ const OPERATIONAL_CONFIG_VALIDATORS = Object.freeze({
   wakeOpenTerminal: (value) => typeof value === "boolean",
 });
 
+const BOT_TOKEN_PATTERN = /^\d+:[A-Za-z0-9_-]{20,}$/;
+
 function asInteger(value, name) {
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isSafeInteger(number)) throw new Error(`${name} must be a safe integer`);
@@ -55,7 +57,7 @@ function preserveOperationalConfig(config, previousConfig) {
 
 function validateSettings(botTokenValue, raw) {
   const botToken = String(botTokenValue || "").trim();
-  if (!/^\d+:[A-Za-z0-9_-]{20,}$/.test(botToken)) throw new Error("Telegram bot token is invalid");
+  if (!BOT_TOKEN_PATTERN.test(botToken)) throw new Error("Telegram bot token is invalid");
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Telegram config must be a JSON object");
   const chatId = asInteger(raw.chatId, "chatId");
   const allowedUserId = asInteger(raw.allowedUserId ?? chatId, "allowedUserId");
@@ -135,4 +137,4 @@ async function readSettings(options = {}) {
   return pair.settings;
 }
 
-module.exports = Object.freeze({ normalizeApiBaseUrl, preserveOperationalConfig, readSettings, validateSettings });
+module.exports = Object.freeze({ BOT_TOKEN_PATTERN, normalizeApiBaseUrl, preserveOperationalConfig, readSettings, validateSettings });

@@ -11,7 +11,7 @@ const {
   SECRET_PATH,
   STATE_PATH,
 } = require("./src/shared/paths.cjs");
-const { normalizeApiBaseUrl, preserveOperationalConfig } = require("./src/shared/settings.cjs");
+const { BOT_TOKEN_PATTERN, normalizeApiBaseUrl, preserveOperationalConfig } = require("./src/shared/settings.cjs");
 const { telegramCall } = require("./src/telegram/api.cjs");
 
 async function portIsListening(port) {
@@ -136,7 +136,7 @@ async function main() {
   }
   stdout.write("Create a dedicated bot with @BotFather and enable Threaded Mode before continuing.\n");
   const token = String(process.env.TELEGRAM_BOT_TOKEN || await hiddenQuestion("Bot token (hidden): ")).trim();
-  if (!/^\d+:[A-Za-z0-9_-]{20,}$/.test(token)) throw new Error("Invalid Telegram bot token");
+  if (!BOT_TOKEN_PATTERN.test(token)) throw new Error("Invalid Telegram bot token");
 
   const terminal = readline.createInterface({ input: stdin, output: stdout });
   try {

@@ -4,7 +4,6 @@ const { sendLine } = require("../bridge/protocol.cjs");
 const { enqueueKeyed } = require("../shared/queue.cjs");
 const { MAX_PENDING_REPLIES, MAX_TOPICS, pruneExpiredBrokerState, queuePersist } = require("../broker/state.cjs");
 const { CONTROL_COMMANDS, CONTROL_PANEL_COMMANDS, RESTORE_CONTEXT_PROMPT, controlPanel, parseControlCallback, parseRestoreCallback, topicName, translateTelegramCommand } = require("./control.cjs");
-const { splitMarkdown } = require("./format.cjs");
 const { attachmentFromMessage, downloadTelegramAttachment } = require("./files.cjs");
 const { parseSessionAction, sendTopicChatAction, syncTopicDashboard, updateDashboard } = require("./dashboard.cjs");
 const { parseQuestionCallback } = require("./questions.cjs");

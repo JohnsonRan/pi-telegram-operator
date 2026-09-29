@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 
-const path = require("node:path");
 const { daemonLogPath, installDaemonLogging } = require("./src/service/daemon-log.cjs");
+const { AGENT_DIR } = require("./src/shared/paths.cjs");
 
 process.env.PI_TELEGRAM_DAEMON = "1";
 
-const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(process.env.USERPROFILE || process.env.HOME, ".pi", "agent");
 const logPath = installDaemonLogging({
-  logPath: daemonLogPath(agentDir),
+  logPath: daemonLogPath(AGENT_DIR),
   mirror: process.stdout.isTTY || process.stderr.isTTY,
 });
 console.log(`[pi-telegram-operator] Wake daemon starting (pid ${process.pid}, log ${logPath})`);
