@@ -2,7 +2,7 @@ const { randomUUID } = require("node:crypto");
 const net = require("node:net");
 const path = require("node:path");
 const { PROTOCOL_VERSION, attachLineReader, sendLine } = require("../bridge/protocol.cjs");
-const { pruneExpiredBrokerState, queuePersist, readBrokerState, trimMappings } = require("./state.cjs");
+const { MAX_PENDING_QUESTIONS, pruneExpiredBrokerState, queuePersist, readBrokerState, trimMappings } = require("./state.cjs");
 const { formatWakeExitDetail, normalizePiCommands } = require("../telegram/control.cjs");
 const { escapeHtml, renderTelegramChunkPairs, renderTelegramHtml, splitMarkdown } = require("../telegram/format.cjs");
 const { sendSessionArtifact } = require("../telegram/files.cjs");
@@ -12,9 +12,11 @@ const { AGENT_DIR } = require("../shared/paths.cjs");
 const { errorMessage, telegramCall, telegramFormattedCall } = require("../telegram/api.cjs");
 const {
   deliverPendingForSession,
+  deliverPendingReply,
   enqueueStream,
   pollTelegram,
   releaseWakeFollowups,
+  sendBrokerText,
   syncTelegramCommandMenu,
   withTopicRetry,
   __test: telegramRouterTest,
@@ -284,7 +286,7 @@ function handleBrokerRequest(state, client, message) {
         options,
         createdAt: Date.now(),
       });
-      while (state.pendingQuestions.size > 100) state.pendingQuestions.delete(state.pendingQuestions.keys().next().value);
+      while (state.pendingQuestions.size > MAX_PENDING_QUESTIONS) state.pendingQuestions.delete(state.pendingQuestions.keys().next().value);
       await queuePersist(state);
       syncTopicDashboard(state, topic, { phase: "Waiting for answer", detail: String(message.question || "Pi needs your input") })
         .then(() => queuePersist(state)).catch(() => {});
@@ -355,6 +357,19 @@ function closeLeader(state) {
   return state.closePromise;
 }
 
+async function reportWakeExit(state, { sessionId, code, signal, cancelled, stderr }) {
+  if (state.foregroundStartups.has(sessionId)) return;
+  state.wakeReservations.delete(sessionId);
+  if (code === 0 || cancelled) return;
+  const topic = state.topics.get(sessionId);
+  if (!topic) return;
+  const detail = formatWakeExitDetail(stderr);
+  await sendBrokerText(state, [
+    `Background Pi exited before completing (${signal || `code ${code}`}).`,
+    ...(detail ? ["", detail] : []),
+  ].join("\n"), { threadId: topic.threadId });
+}
+
 async function startLocalLeader(secret) {
   const server = net.createServer({ pauseOnConnect: true });
   const acquired = await new Promise((resolve, reject) => {
@@ -412,18 +427,7 @@ async function startLocalLeader(secret) {
     piCommandArgs: secret.wakePiCommandArgs,
     openTerminal: secret.wakeOpenTerminal,
     terminalSpecDir: path.join(AGENT_DIR, "terminal-launches"),
-    onExit: async ({ sessionId, code, signal, cancelled, stderr }) => {
-      if (state.foregroundStartups.has(sessionId)) return;
-      state.wakeReservations.delete(sessionId);
-      if (code === 0 || cancelled) return;
-      const topic = state.topics.get(sessionId);
-      if (!topic) return;
-      const detail = formatWakeExitDetail(stderr);
-      await sendBrokerText(state, [
-        `Background Pi exited before completing (${signal || `code ${code}`}).`,
-        ...(detail ? ["", detail] : []),
-      ].join("\n"), { threadId: topic.threadId });
-    },
+    onExit: (exit) => reportWakeExit(state, exit),
   });
   pruneExpiredBrokerState(state);
   queuePersist(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot normalize state: ${errorMessage(error)}`));
@@ -469,5 +473,5 @@ async function startLocalLeader(secret) {
 module.exports = Object.freeze({
   closeLeader,
   startLocalLeader,
-  __test: Object.freeze({ enqueueStream, ...telegramRouterTest }),
+  __test: Object.freeze({ enqueueStream, reportWakeExit, schedulePendingRetry, ...telegramRouterTest }),
 });

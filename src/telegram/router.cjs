@@ -674,9 +674,11 @@ async function pollTelegram(state) {
 module.exports = Object.freeze({
   connectedTarget,
   deliverPendingForSession,
+  deliverPendingReply,
   enqueueStream,
   pollTelegram,
   releaseWakeFollowups,
+  sendBrokerText,
   syncTelegramCommandMenu,
   withTopicRetry,
   __test: Object.freeze({
