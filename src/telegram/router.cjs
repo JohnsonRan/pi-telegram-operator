@@ -147,31 +147,30 @@ async function sendBrokerText(state, text, options = {}) {
   });
 }
 
-async function waitForWakeRegistration(state, sessionId, timeoutMs = WAKE_REGISTRATION_TIMEOUT_MS) {
+// Polls check every 100 ms; resolves with its first truthy result or its value at the deadline.
+async function pollUntil(check, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  for (;;) {
+    const value = check();
+    if (value || Date.now() >= deadline) return value;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+function waitForWakeRegistration(state, sessionId, timeoutMs = WAKE_REGISTRATION_TIMEOUT_MS) {
+  return pollUntil(() => {
     const client = connectedTarget(state, sessionId);
-    if (client?.wakeChild) return client;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return undefined;
+    return client?.wakeChild ? client : undefined;
+  }, timeoutMs);
 }
 
-async function waitForWakeStop(state, sessionId, timeoutMs = WAKE_STOP_TIMEOUT_MS) {
-  const deadline = Date.now() + timeoutMs;
-  while (state.wakeLauncher.isRunning(sessionId) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return !state.wakeLauncher.isRunning(sessionId);
+function waitForWakeStop(state, sessionId, timeoutMs = WAKE_STOP_TIMEOUT_MS) {
+  return pollUntil(() => !state.wakeLauncher.isRunning(sessionId), timeoutMs);
 }
 
+// True when the wake process is still running after timeoutMs.
 async function waitForWakeStability(state, sessionId, timeoutMs = WAKE_STABILITY_TIMEOUT_MS) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!state.wakeLauncher.isRunning(sessionId)) return false;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return state.wakeLauncher.isRunning(sessionId);
+  return !(await waitForWakeStop(state, sessionId, timeoutMs));
 }
 
 async function launchWakeSession(state, topic, prompt, replyTo) {
