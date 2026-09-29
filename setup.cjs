@@ -11,7 +11,7 @@ const {
   SECRET_PATH,
   STATE_PATH,
 } = require("./src/shared/paths.cjs");
-const { preserveOperationalConfig } = require("./src/shared/settings.cjs");
+const { normalizeApiBaseUrl, preserveOperationalConfig } = require("./src/shared/settings.cjs");
 const { telegramCall } = require("./src/telegram/api.cjs");
 
 async function portIsListening(port) {
@@ -33,8 +33,11 @@ async function brokerIsRunning(read = readFile) {
   return Number.isInteger(port) && port >= 1024 && port <= 65535 && portIsListening(port);
 }
 
+// Setup has no config yet, so a custom Bot API endpoint comes from the environment.
+const apiBaseUrl = normalizeApiBaseUrl(process.env.TELEGRAM_API_BASE_URL);
+
 function call(token, method, payload, timeoutMs = 35_000) {
-  return telegramCall({ botToken: token }, method, payload, timeoutMs);
+  return telegramCall({ botToken: token, apiBaseUrl }, method, payload, timeoutMs);
 }
 
 function hiddenQuestion(prompt) {
@@ -190,6 +193,7 @@ async function main() {
       bridgeSecret: randomBytes(32).toString("hex"),
       port: DEFAULT_PORT,
       linkPreview: false,
+      apiBaseUrl,
       wakeMode: false,
       wakeDefaultCwd: "",
       wakeAllowedRoots: [],
@@ -199,6 +203,8 @@ async function main() {
     };
     let state = { generation: 0, offset, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] };
     ({ config, state } = await mergePreviousInstallation(config, state, selected));
+    // The endpoint setup just verified wins over a preserved one.
+    if (process.env.TELEGRAM_API_BASE_URL) config.apiBaseUrl = apiBaseUrl;
 
     const secretContent = `${token}\n`;
     const configContent = `${JSON.stringify(config, null, 2)}\n`;

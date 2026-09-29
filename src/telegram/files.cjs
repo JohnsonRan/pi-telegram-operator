@@ -5,7 +5,7 @@ const path = require("node:path");
 const { Readable, Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 const { isPathInside } = require("../shared/paths.cjs");
-const { telegramCall, telegramMultipartCall } = require("./api.cjs");
+const { telegramCall, telegramMultipartCall, telegramUrl } = require("./api.cjs");
 
 const MAX_INBOUND_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_OUTBOUND_FILE_BYTES = 50 * 1024 * 1024;
@@ -63,7 +63,7 @@ async function downloadTelegramAttachment(secret, message, topic) {
   const temporary = `${destination}.${randomUUID()}.tmp`;
   let response;
   try {
-    response = await fetch(`https://api.telegram.org/file/bot${secret.botToken}/${fileInfo.file_path}`, {
+    response = await fetch(telegramUrl(secret, `file/bot${secret.botToken}/${fileInfo.file_path}`), {
       signal: AbortSignal.timeout(60_000),
     });
     if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);

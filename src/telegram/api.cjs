@@ -1,10 +1,17 @@
 const { errorMessage } = require("../shared/errors.cjs");
 
+const DEFAULT_API_BASE_URL = "https://api.telegram.org";
+
+// Builds a Bot API URL; path is "bot<token>/<method>" or "file/bot<token>/<file_path>".
+function telegramUrl(secret, path) {
+  return `${secret.apiBaseUrl || DEFAULT_API_BASE_URL}/${path}`;
+}
+
 async function postTelegram(secret, method, init, timeoutMs, externalSignal) {
   let response;
   try {
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
-    response = await fetch(`https://api.telegram.org/bot${secret.botToken}/${method}`, {
+    response = await fetch(telegramUrl(secret, `bot${secret.botToken}/${method}`), {
       method: "POST",
       ...init,
       signal: externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal,
@@ -52,4 +59,4 @@ async function telegramFormattedCall(secret, method, payload, plainText) {
   }
 }
 
-module.exports = Object.freeze({ telegramCall, telegramFormattedCall, telegramMultipartCall });
+module.exports = Object.freeze({ DEFAULT_API_BASE_URL, telegramCall, telegramFormattedCall, telegramMultipartCall, telegramUrl });

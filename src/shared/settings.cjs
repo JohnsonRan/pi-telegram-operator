@@ -4,10 +4,34 @@ const {
   DEFAULT_PORT,
   SECRET_PATH,
 } = require("./paths.cjs");
+const { DEFAULT_API_BASE_URL } = require("../telegram/api.cjs");
+
+function normalizeApiBaseUrl(value) {
+  const text = String(value || DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "");
+  let url;
+  try {
+    url = new URL(text);
+  } catch {
+    url = undefined;
+  }
+  if (!url || !["http:", "https:"].includes(url.protocol) || url.search || url.hash) {
+    throw new Error("apiBaseUrl must be an http(s) URL without query or fragment");
+  }
+  return text;
+}
+
+function isValidApiBaseUrl(value) {
+  try {
+    return typeof value === "string" && Boolean(normalizeApiBaseUrl(value));
+  } catch {
+    return false;
+  }
+}
 
 const OPERATIONAL_CONFIG_VALIDATORS = Object.freeze({
   port: (value) => Number.isInteger(value) && value >= 1024 && value <= 65535,
   linkPreview: (value) => typeof value === "boolean",
+  apiBaseUrl: isValidApiBaseUrl,
   wakeMode: (value) => typeof value === "boolean",
   wakeDefaultCwd: (value) => typeof value === "string",
   wakeAllowedRoots: (value) => Array.isArray(value) && value.every((root) => typeof root === "string"),
@@ -40,6 +64,7 @@ function validateSettings(botTokenValue, raw) {
   const port = raw.port === undefined ? DEFAULT_PORT : asInteger(raw.port, "port");
   if (port < 1024 || port > 65535) throw new Error("port must be between 1024 and 65535");
   const linkPreview = raw.linkPreview === true;
+  const apiBaseUrl = normalizeApiBaseUrl(raw.apiBaseUrl);
   const wakeMode = raw.wakeMode === true;
   const wakeDefaultCwd = String(raw.wakeDefaultCwd || "").trim();
   const wakeAllowedRoots = Array.isArray(raw.wakeAllowedRoots)
@@ -61,6 +86,7 @@ function validateSettings(botTokenValue, raw) {
     bridgeSecret,
     port,
     linkPreview,
+    apiBaseUrl,
     wakeMode,
     wakeDefaultCwd,
     wakeAllowedRoots: Object.freeze(wakeAllowedRoots),
@@ -109,4 +135,4 @@ async function readSettings(options = {}) {
   return pair.settings;
 }
 
-module.exports = Object.freeze({ preserveOperationalConfig, readSettings, validateSettings });
+module.exports = Object.freeze({ normalizeApiBaseUrl, preserveOperationalConfig, readSettings, validateSettings });

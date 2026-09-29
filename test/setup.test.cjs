@@ -28,6 +28,7 @@ test("rerunning setup preserves valid operational preferences", () => {
   const config = {
     port: 43871,
     linkPreview: false,
+    apiBaseUrl: "https://api.telegram.org",
     wakeMode: false,
     wakeDefaultCwd: "",
     wakeAllowedRoots: [],
@@ -39,6 +40,7 @@ test("rerunning setup preserves valid operational preferences", () => {
   preserveOperationalConfig(config, {
     port: 44000,
     linkPreview: true,
+    apiBaseUrl: "http://127.0.0.1:8081",
     wakeMode: true,
     wakeDefaultCwd: "F:\\",
     wakeAllowedRoots: ["F:\\"],
@@ -50,6 +52,7 @@ test("rerunning setup preserves valid operational preferences", () => {
   assert.deepEqual(config, {
     port: 44000,
     linkPreview: true,
+    apiBaseUrl: "http://127.0.0.1:8081",
     wakeMode: true,
     wakeDefaultCwd: "F:\\",
     wakeAllowedRoots: ["F:\\"],

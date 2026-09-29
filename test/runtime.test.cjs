@@ -35,6 +35,17 @@ test("validates split secret/config settings", () => {
   assert.equal(settings.chatId, 42);
   assert.equal(settings.port, 43871);
   assert.equal(settings.linkPreview, false);
+  assert.equal(settings.apiBaseUrl, "https://api.telegram.org");
+  assert.equal(helpers.validateSettings(`123456:${"a".repeat(32)}`, {
+    chatId: 42,
+    bridgeSecret: "b".repeat(64),
+    apiBaseUrl: "http://127.0.0.1:8081/tg/ ",
+  }).apiBaseUrl, "http://127.0.0.1:8081/tg");
+  assert.throws(() => helpers.validateSettings(`123456:${"a".repeat(32)}`, {
+    chatId: 42,
+    bridgeSecret: "b".repeat(64),
+    apiBaseUrl: "ftp://example.com",
+  }), /apiBaseUrl/);
   const enabled = helpers.validateSettings(`123456:${"a".repeat(32)}`, {
     chatId: 42,
     bridgeSecret: "b".repeat(64),
@@ -563,8 +574,10 @@ test("stream queue cleanup does not create an unhandled rejection", async () => 
 test("retries a Telegram rate limit once using retry_after", async () => {
   const originalFetch = global.fetch;
   let calls = 0;
-  global.fetch = async () => {
+  const urls = [];
+  global.fetch = async (url) => {
     calls += 1;
+    urls.push(url);
     if (calls === 1) {
       return {
         ok: false,
@@ -576,7 +589,7 @@ test("retries a Telegram rate limit once using retry_after", async () => {
   };
   try {
     const result = await helpers.telegramCall(
-      { botToken: `123456:${"a".repeat(32)}` },
+      { botToken: `123456:${"a".repeat(32)}`, apiBaseUrl: "http://127.0.0.1:8081" },
       "sendMessageDraft",
       { text: "status" },
     );
@@ -585,6 +598,7 @@ test("retries a Telegram rate limit once using retry_after", async () => {
     global.fetch = originalFetch;
   }
   assert.equal(calls, 2);
+  assert.equal(urls[0], `http://127.0.0.1:8081/bot123456:${"a".repeat(32)}/sendMessageDraft`);
 });
 
 test("falls back to plain text only after a deterministic Telegram Bad Request", async () => {

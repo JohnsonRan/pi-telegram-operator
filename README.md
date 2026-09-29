@@ -80,6 +80,7 @@ Example non-secret configuration:
   "bridgeSecret": "generated-random-value",
   "port": 43871,
   "linkPreview": false,
+  "apiBaseUrl": "https://api.telegram.org",
   "wakeMode": true,
   "wakeDefaultCwd": "F:\\",
   "wakeAllowedRoots": ["F:\\"],
@@ -90,6 +91,8 @@ Example non-secret configuration:
 ```
 
 `linkPreview` defaults to `false`, which disables URL previews on notifications and persisted assistant messages. Set it to `true` to opt back in. Telegram's ephemeral `sendMessageDraft` method does not expose link preview options.
+
+`apiBaseUrl` defaults to `https://api.telegram.org`. Point it at a reverse proxy, mirror, or self-hosted [Bot API server](https://github.com/tdlib/telegram-bot-api) (for example `http://127.0.0.1:8081`) when the official endpoint is unreachable. The bot token is sent to this URL, so only use endpoints you trust. The server's `--local` mode is not supported because it returns local file paths instead of downloadable files. To run setup itself through a custom endpoint, set `TELEGRAM_API_BASE_URL` for that run; setup stores it as `apiBaseUrl`.
 
 ## Wake daemon
 
