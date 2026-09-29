@@ -28,7 +28,7 @@ async function launchDetachedWakeDaemon() {
       });
       child.once("spawn", () => {
         child.unref();
-        resolve();
+        resolve(undefined);
       });
       child.once("error", reject);
     }).finally(() => {
@@ -112,7 +112,7 @@ async function connectClient(state) {
             clearTimeout(timer);
             state.handshake = undefined;
             state.connected = true;
-            resolve();
+            resolve(undefined);
           },
           reject: (error) => {
             clearTimeout(timer);

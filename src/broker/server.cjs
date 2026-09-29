@@ -347,10 +347,10 @@ function closeLeader(state) {
     await Promise.resolve(state.persistQueue).catch(() => {});
     await new Promise((resolve, reject) => {
       if (!state.server.listening) {
-        resolve();
+        resolve(undefined);
         return;
       }
-      state.server.close((error) => error ? reject(error) : resolve());
+      state.server.close((error) => error ? reject(error) : resolve(undefined));
       state.server.closeAllConnections?.();
     });
   })();

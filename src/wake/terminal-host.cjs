@@ -39,9 +39,7 @@ function readSpec() {
     pidPath = `${specPath}.pid`;
     writeFileSync(pidPath, String(process.pid), { mode: 0o600 });
     if (existsSync(cancelPath)) {
-      const error = new Error("Telegram terminal launch was cancelled");
-      error.code = "PI_TELEGRAM_LAUNCH_CANCELLED";
-      throw error;
+      throw Object.assign(new Error("Telegram terminal launch was cancelled"), { code: "PI_TELEGRAM_LAUNCH_CANCELLED" });
     }
     return spec;
   } finally {

@@ -55,8 +55,7 @@ function cloneWithGit(remote, destination, cwd) {
         resolve({ stdout, stderr });
         return;
       }
-      error.gitOutput = String(stderr || stdout || error.message || "");
-      reject(error);
+      reject(Object.assign(error, { gitOutput: String(stderr || stdout || error.message || "") }));
     });
   });
 }

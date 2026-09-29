@@ -165,6 +165,7 @@ class WakeLauncher {
     };
     await prepareTerminalSpecDir(this.terminalSpecDir);
     const stderrPath = path.join(this.terminalSpecDir, `wake-${process.pid}-${randomUUID()}.stderr`);
+    /** @type {Record<string, any>} */
     let launch = { command: this.piCommand, args: backgroundArgs, windowsHide: true };
     let foreground = false;
     let fallbackReason;
@@ -262,7 +263,7 @@ class WakeLauncher {
       await new Promise((resolve, reject) => {
         child.once("spawn", () => {
           spawned = true;
-          resolve();
+          resolve(undefined);
         });
         child.once("error", reject);
       });
