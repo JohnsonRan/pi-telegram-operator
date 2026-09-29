@@ -92,6 +92,20 @@ test("starts a background wake session without terminal checks", async (t) => {
   assert.equal(state.foregroundStartups.size, 0);
 });
 
+test("reports background exits as soon as a terminal is unavailable", async (t) => {
+  const launcher = fakeLauncher([{ fallbackReason: "no supported terminal emulator was found" }]);
+  const { state, topic, notices } = wakeState(t, launcher);
+  let foregroundDuringNotice;
+  global.fetch = async () => {
+    foregroundDuringNotice = state.foregroundStartups.size;
+    notices.push("sent");
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+  };
+  await router.launchWakeSession(state, topic, "hello");
+  // A non-empty set here would make reportWakeExit ignore a crash during the notice.
+  assert.equal(foregroundDuringNotice, 0);
+});
+
 test("keeps a foreground terminal that registers and stays running", async (t) => {
   enableTimers(t);
   const launcher = fakeLauncher([{ foreground: true, terminal: "Windows Console", registers: true }]);

@@ -172,77 +172,66 @@ async function waitForWakeStability(state, sessionId, timeoutMs = WAKE_STABILITY
   return !(await waitForWakeStop(state, sessionId, timeoutMs));
 }
 
+function wakeLaunchMode(launched) {
+  if (launched.foreground) return `Opening ${launched.terminal || "terminal"}`;
+  if (launched.fallbackReason) return `No terminal available; using background mode (${launched.fallbackReason})`;
+  return "Starting in background mode";
+}
+
+// Verifies a foreground terminal actually hosts a connected Pi; otherwise
+// stops it and relaunches in background mode.
+async function confirmForegroundWake(state, request, notify, launched) {
+  const { sessionId } = request;
+  const registered = await waitForWakeRegistration(state, sessionId);
+  if (registered && await waitForWakeStability(state, sessionId)) return launched;
+  state.wakeLauncher.cancel(sessionId);
+  if (!(await waitForWakeStop(state, sessionId))) {
+    if (connectedTarget(state, sessionId)) return launched;
+    throw new Error("The terminal opened but Pi did not connect to the Telegram broker");
+  }
+  // From here on exits belong to the background process and must be reported.
+  state.foregroundStartups.delete(sessionId);
+  state.wakeReservations.add(sessionId);
+  const fallback = await state.wakeLauncher.launch({ ...request, openTerminal: false });
+  if (!fallback.started) return launched;
+  await notify(registered
+    ? "Terminal exited during startup; switched to background mode"
+    : "Terminal did not connect; switched to background mode");
+  return fallback;
+}
+
 async function launchWakeSession(state, topic, prompt, replyTo) {
-  if (state.wakeReservations.has(topic.sessionId)) return { started: false, reserved: true };
-  state.wakeReservations.add(topic.sessionId);
+  const { sessionId } = topic;
+  if (state.wakeReservations.has(sessionId)) return { started: false, reserved: true };
+  state.wakeReservations.add(sessionId);
   try {
     const cwd = await resolveWakeCwd(topic.cwd, state.secret.wakeDefaultCwd, state.secret.wakeAllowedRoots);
-    if (connectedTarget(state, topic.sessionId)) {
-      state.wakeReservations.delete(topic.sessionId);
+    if (connectedTarget(state, sessionId)) {
+      state.wakeReservations.delete(sessionId);
       return { started: false, connected: true };
     }
     for (const pending of state.pendingReplies.values()) {
-      if (pending.sessionId === topic.sessionId) pending.holdForWake = true;
+      if (pending.sessionId === sessionId) pending.holdForWake = true;
     }
     queuePersist(state).catch(() => {});
-    const preferForeground = state.secret.wakeOpenTerminal;
-    if (preferForeground) state.foregroundStartups.add(topic.sessionId);
-    let launched = await state.wakeLauncher.launch({
-      sessionId: topic.sessionId,
-      cwd,
-      sessionName: topic.name,
-      prompt,
-    });
-    if (!launched.foreground) state.foregroundStartups.delete(topic.sessionId);
-    if (launched.started) {
-      let mode = launched.foreground
-        ? `Opening ${launched.terminal || "terminal"}`
-        : launched.fallbackReason
-          ? `No terminal available; using background mode (${launched.fallbackReason})`
-          : "Starting in background mode";
-      await sendBrokerText(state, `Waking Pi session ${topic.sessionId.slice(0, 8)}…\n${mode}`, {
-        threadId: topic.threadId,
-        replyTo,
-      });
-      if (launched.foreground) {
-        const registered = await waitForWakeRegistration(state, topic.sessionId);
-        const stable = registered ? await waitForWakeStability(state, topic.sessionId) : false;
-        if (!stable) {
-          state.wakeLauncher.cancel(topic.sessionId);
-          const stopped = await waitForWakeStop(state, topic.sessionId);
-          const connected = connectedTarget(state, topic.sessionId);
-          if (stopped) {
-            state.foregroundStartups.delete(topic.sessionId);
-            state.wakeReservations.add(topic.sessionId);
-            const fallback = await state.wakeLauncher.launch({
-              sessionId: topic.sessionId,
-              cwd,
-              sessionName: topic.name,
-              prompt,
-              openTerminal: false,
-            });
-            if (fallback.started) {
-              launched = fallback;
-              mode = registered
-                ? "Terminal exited during startup; switched to background mode"
-                : "Terminal did not connect; switched to background mode";
-              await sendBrokerText(state, mode, { threadId: topic.threadId, replyTo });
-            }
-          } else {
-            state.foregroundStartups.delete(topic.sessionId);
-            if (!connected) throw new Error("The terminal opened but Pi did not connect to the Telegram broker");
-          }
-        } else {
-          state.foregroundStartups.delete(topic.sessionId);
-        }
+    const request = { sessionId, cwd, sessionName: topic.name, prompt };
+    const notify = (text) => sendBrokerText(state, text, { threadId: topic.threadId, replyTo });
+    if (state.secret.wakeOpenTerminal) state.foregroundStartups.add(sessionId);
+    try {
+      let launched = await state.wakeLauncher.launch(request);
+      if (!launched.foreground) state.foregroundStartups.delete(sessionId);
+      if (launched.started) {
+        await notify(`Waking Pi session ${sessionId.slice(0, 8)}…\n${wakeLaunchMode(launched)}`);
+        if (launched.foreground) launched = await confirmForegroundWake(state, request, notify, launched);
+      } else if (!state.wakeLauncher.isRunning(sessionId)) {
+        state.wakeReservations.delete(sessionId);
       }
-    } else if (!state.wakeLauncher.isRunning(topic.sessionId)) {
-      state.wakeReservations.delete(topic.sessionId);
+      return launched;
+    } finally {
+      state.foregroundStartups.delete(sessionId);
     }
-    return launched;
   } catch (error) {
-    state.foregroundStartups.delete(topic.sessionId);
-    state.wakeReservations.delete(topic.sessionId);
+    state.wakeReservations.delete(sessionId);
     throw error;
   }
 }

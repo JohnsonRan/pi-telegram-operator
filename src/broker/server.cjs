@@ -412,7 +412,10 @@ async function startLocalLeader(secret) {
     activeTasks: new Set(),
     clients: new Map(),
     clientsBySession: new Map(),
+    // Sessions with a wake launch in progress or a wake process running.
     wakeReservations: new Set(),
+    // Sessions whose foreground terminal is still being verified; their exits
+    // are expected (cancel + fallback) and are not reported as failures.
     foregroundStartups: new Set(),
     wakeLauncher: undefined,
     persistQueue: Promise.resolve(),
