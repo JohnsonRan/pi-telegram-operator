@@ -109,34 +109,26 @@ async function readOptional(read, file) {
   }
 }
 
-async function readSettingsPair(read, secretPath, configPath, label) {
-  const [token, configText] = await Promise.all([
-    readOptional(read, secretPath),
-    readOptional(read, configPath),
-  ]);
-  const count = Number(token !== undefined) + Number(configText !== undefined);
-  if (count === 0) return undefined;
-  if (count !== 2) return { incomplete: true, label };
-  try {
-    return { settings: validateSettings(token, JSON.parse(configText)) };
-  } catch (error) {
-    if (error instanceof SyntaxError) throw new Error(`Telegram config contains invalid JSON: ${configPath}`);
-    throw error;
-  }
-}
-
 async function readSettings(options = {}) {
   const read = options.readFile || readFile;
-  const secretPath = options.secretPath || SECRET_PATH;
   const configPath = options.configPath || CONFIG_PATH;
-  const pair = await readSettingsPair(read, secretPath, configPath, "TelegraPi");
-  if (pair?.incomplete) {
-    throw new Error(`${pair.label} Telegram settings are incomplete; both secret and config files are required`);
-  }
-  if (!pair?.settings) {
+  const [token, configText] = await Promise.all([
+    readOptional(read, options.secretPath || SECRET_PATH),
+    readOptional(read, configPath),
+  ]);
+  if (token === undefined && configText === undefined) {
     throw new Error("Telegram setup is incomplete. Run the installed pi-telegram-operator setup.cjs first.");
   }
-  return pair.settings;
+  if (token === undefined || configText === undefined) {
+    throw new Error("TelegraPi Telegram settings are incomplete; both secret and config files are required");
+  }
+  let raw;
+  try {
+    raw = JSON.parse(configText);
+  } catch {
+    throw new Error(`Telegram config contains invalid JSON: ${configPath}`);
+  }
+  return validateSettings(token, raw);
 }
 
 module.exports = Object.freeze({ BOT_TOKEN_PATTERN, normalizeApiBaseUrl, preserveOperationalConfig, readSettings, validateSettings });
