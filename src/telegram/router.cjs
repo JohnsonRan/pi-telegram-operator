@@ -651,6 +651,7 @@ module.exports = Object.freeze({
     findReplyTarget,
     handleCallbackQuery,
     handleControlMessage,
+    launchWakeSession,
     processTelegramUpdate,
     restoreSessionTopic,
     waitForWakeRegistration,
