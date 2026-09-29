@@ -253,10 +253,7 @@ async function handleControlMessage(state, message) {
   const cloneCommand = parseGitCloneCommand(message.text);
   const updateCommand = parsePiUpdateCommand(message.text);
   const parsed = parseControlCommand(message.text);
-  const replyOptions = {
-    replyTo: message.message_id,
-    ...(Number.isSafeInteger(message.message_thread_id) ? { threadId: message.message_thread_id } : {}),
-  };
+  const replyOptions = { replyTo: message.message_id, threadId: message.message_thread_id };
   if (updateCommand) {
     await sendBrokerText(state, "Running pi update --all…", replyOptions);
     const output = await (state.runPiUpdate || runPiUpdate)({
@@ -360,13 +357,12 @@ async function handleTelegramMessage(state, message) {
     ? [...state.topics.values()].find((topic) => topic.threadId === message.message_thread_id)
     : undefined;
   const threadIsKnown = Boolean(topicForThread);
+  const replyOptions = { replyTo: message.message_id, threadId: message.message_thread_id };
   const attachment = attachmentFromMessage(message);
   if (attachment) {
     if (!topicForThread) {
-      await sendBrokerText(state, "Send files inside a Pi session topic so they can be saved to that session.", {
-        replyTo: message.message_id,
-        ...(Number.isSafeInteger(message.message_thread_id) ? { threadId: message.message_thread_id } : {}),
-      }).catch(() => {});
+      await sendBrokerText(state, "Send files inside a Pi session topic so they can be saved to that session.", replyOptions)
+        .catch(() => {});
       return;
     }
     try {
@@ -383,10 +379,7 @@ async function handleTelegramMessage(state, message) {
         ].join("\n"),
       };
     } catch (error) {
-      await sendBrokerText(state, `Could not save attachment: ${errorMessage(error)}`, {
-        threadId: message.message_thread_id,
-        replyTo: message.message_id,
-      }).catch(() => {});
+      await sendBrokerText(state, `Could not save attachment: ${errorMessage(error)}`, replyOptions).catch(() => {});
       return;
     }
   }
@@ -398,22 +391,15 @@ async function handleTelegramMessage(state, message) {
       await handleControlMessage(state, message);
       acknowledgeTelegramMessage(state, message).catch(() => {});
     } catch (error) {
-      await sendBrokerText(state, `Command failed: ${errorMessage(error)}`, {
-        replyTo: message.message_id,
-        ...(Number.isSafeInteger(message.message_thread_id) ? { threadId: message.message_thread_id } : {}),
-      }).catch(() => {});
+      await sendBrokerText(state, `Command failed: ${errorMessage(error)}`, replyOptions).catch(() => {});
     }
     return;
   }
 
   const target = findReplyTarget(state, message);
   if (!target) {
-    await telegramCall(state.secret, "sendMessage", {
-      chat_id: state.secret.chatId,
-      text: "No active Pi session is available for this topic.",
-      reply_to_message_id: message.message_id,
-      ...(Number.isSafeInteger(message.message_thread_id) ? { message_thread_id: message.message_thread_id } : {}),
-    }).catch(warn("Cannot send reply notice"));
+    await sendBrokerText(state, "No active Pi session is available for this topic.", replyOptions)
+      .catch(warn("Cannot send reply notice"));
     return;
   }
 
@@ -435,10 +421,7 @@ async function handleTelegramMessage(state, message) {
           }
           holdForWake = launched.reserved === true;
         } catch (error) {
-          await sendBrokerText(state, `Could not wake Pi: ${errorMessage(error)}`, {
-            threadId: message.message_thread_id,
-            replyTo: message.message_id,
-          }).catch(() => {});
+          await sendBrokerText(state, `Could not wake Pi: ${errorMessage(error)}`, replyOptions).catch(() => {});
           return;
         }
       }
@@ -447,10 +430,8 @@ async function handleTelegramMessage(state, message) {
 
   if (pruneExpiredBrokerState(state)) queuePersist(state).catch(() => {});
   if (state.pendingReplies.size >= MAX_PENDING_REPLIES) {
-    await telegramCall(state.secret, "sendMessage", {
-      chat_id: state.secret.chatId,
-      ...(Number.isSafeInteger(message.message_thread_id) ? { message_thread_id: message.message_thread_id } : {}),
-      text: "Pi reply queue is full. Please try again after pending replies are delivered.",
+    await sendBrokerText(state, "Pi reply queue is full. Please try again after pending replies are delivered.", {
+      threadId: message.message_thread_id,
     });
     return;
   }
@@ -458,14 +439,9 @@ async function handleTelegramMessage(state, message) {
   const queued = await queueTelegramReply(state, target, message, holdForWake);
   acknowledgeTelegramMessage(state, message).catch(() => {});
   if (!queued.delivered) {
-    await telegramCall(state.secret, "sendMessage", {
-      chat_id: state.secret.chatId,
-      text: holdForWake
-        ? "Reply queued behind the session's current wake turn."
-        : "Reply queued until the target Pi session reconnects.",
-      reply_to_message_id: message.message_id,
-      ...(Number.isSafeInteger(message.message_thread_id) ? { message_thread_id: message.message_thread_id } : {}),
-    }).catch(warn("Cannot send reply notice"));
+    await sendBrokerText(state, holdForWake
+      ? "Reply queued behind the session's current wake turn."
+      : "Reply queued until the target Pi session reconnects.", replyOptions).catch(warn("Cannot send reply notice"));
   }
 }
 
@@ -610,7 +586,7 @@ async function handleCallbackQuery(state, query, options = {}) {
       await (options.restoreSessionTopic || restoreSessionTopic)(state, restoreTopic);
     } catch (error) {
       await sendBrokerText(state, `Could not restore Pi session: ${errorMessage(error)}`, {
-        ...(Number.isSafeInteger(query.message?.message_thread_id) ? { threadId: query.message.message_thread_id } : {}),
+        threadId: query.message?.message_thread_id,
       }).catch(() => {});
     }
     return;
