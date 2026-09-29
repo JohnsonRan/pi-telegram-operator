@@ -1,102 +1,184 @@
 # TelegraPi
 
-`pi-telegram-operator` is a threaded Telegram operator for [Pi](https://github.com/earendil-works/pi).
+Chat with your [Pi](https://github.com/earendil-works/pi) coding sessions from Telegram.
 
-Each Pi session gets its own topic in the bot's private chat. Telegram replies are injected as real Pi user messages, and assistant text is streamed with Telegram's native `sendMessageDraft` API before being persisted as a normal message.
-
-## Features
-
-- One private Telegram topic per top-level Pi session
-- Subagent processes (`PI_SUBAGENT_CHILD=1`) stay inside their parent session and do not create topics
-- Native streaming assistant responses
-- Live main-agent turn/tool status, including `pi-subagents` child progress when available
-- Safe Markdown-to-Telegram-HTML rendering for headings, emphasis, code, links, quotes, spoilers, and lists
-- Notification replies become `pi.sendUserMessage()` input
-- Multiple concurrent Pi processes share one localhost broker and one `getUpdates` poller
-- Optional always-on wake daemon resumes a stopped Pi session when its topic receives a message
-- The unthreaded All Topics view provides explicit `/new`, `/sessions`, `/status`, and `/help` control commands
-- Pi extension, prompt-template, and skill commands are synchronized into Telegram's bot command menu
-- Cross-platform per-user services support Windows Scheduled Tasks, macOS LaunchAgents, and Linux systemd user units
-- Replies route by `message_thread_id`, so agents cannot consume each other's messages
-- Busy sessions receive Telegram input as `steer`; idle sessions start a normal turn
-- Consumes `pi:semantic-hook:v1` notifications from `pi-notify` and other neutral producers
-- Bot token stays in a dedicated plain secret file, separate from JSON configuration
-
-## Requirements
-
-- Pi 0.84.0 or newer
-- Node.js 22.19.0 or newer
-- A dedicated Telegram bot with **Threaded Mode** enabled
-
-Enable Threaded Mode in `@BotFather`:
+TelegraPi gives every Pi session its own topic in a private chat with your bot. Pi's answers stream into that topic as it types. When you reply there, the reply goes to that session as if you had typed it at the keyboard. With wake mode on, you can also start new sessions or resume stopped ones from your phone.
 
 ```text
-Select bot -> Bot Settings -> Threaded Mode -> Enable
+Pi session A  ⇄  Telegram topic "project-a · 1a2b3c4d"
+Pi session B  ⇄  Telegram topic "project-b · 5e6f7a8b"
 ```
 
-Threaded Mode must be enabled in the bot's private chat. A forum supergroup is not required.
+## What you can do
 
-## Install
+- **Follow along live.** Pi's replies stream into the topic, along with what it is doing right now (thinking, which tool it is running, subagent progress).
+- **Reply from anywhere.** Your message reaches that session: it starts a new turn if Pi is idle, or steers the current turn if Pi is busy. Sessions never see each other's messages.
+- **Control the session with buttons.** Each topic has a pinned status card with **Continue**, **Stop**, **Retry**, and **Refresh** buttons.
+- **Answer Pi's questions.** When Pi asks a multiple-choice question, you get tap-to-answer buttons.
+- **Exchange files.** Send Pi a photo or document; Pi can send reports, archives, and images back.
+- **Run Pi commands.** Your Pi extension commands, prompt templates, and skills appear in Telegram's `/` menu.
+- **Wake Pi remotely** (optional). Message a stopped session to resume it, create new sessions, clone a repository, or update Pi, all from the chat.
+
+## Quick start
+
+You need Pi 0.84.0+, Node.js 22.19.0+, and a Telegram account.
+
+### 1. Create a bot
+
+1. Open [@BotFather](https://t.me/BotFather), send `/newbot`, and keep the token it gives you.
+2. Turn on topics for the bot: **Select bot → Bot Settings → Threaded Mode → Enable**.
+
+Use a dedicated bot for TelegraPi. Topics live in your private chat with the bot, so you don't need a group.
+
+### 2. Install
 
 ```bash
 pi install git:github.com/JohnsonRan/pi-telegram-operator
 ```
 
-Restart Pi after installation.
+### 3. Run setup
 
-## Configure
-
-Run the interactive setup utility from the installed Git checkout:
+Close all running Pi sessions first, then run:
 
 ```bash
 node "$HOME/.pi/agent/git/github.com/JohnsonRan/pi-telegram-operator/setup.cjs"
 ```
 
-If `PI_CODING_AGENT_DIR` points somewhere else, replace `$HOME/.pi/agent` with that directory. When developing from a clone, run `node setup.cjs` in the repository root. Stop all Pi sessions before rerunning setup so there is no competing Telegram `getUpdates` poller.
+On Windows PowerShell, use `node "$env:USERPROFILE\.pi\agent\git\github.com\JohnsonRan\pi-telegram-operator\setup.cjs"`. If you set `PI_CODING_AGENT_DIR`, use that directory instead of `~/.pi/agent`.
 
-The setup process:
+Setup asks for the bot token (input is hidden), then asks you to send a one-time `/start <code>` message to the bot so it knows which Telegram account to trust. It also briefly creates and deletes a test topic to confirm Threaded Mode works.
 
-1. Reads the BotFather token without echoing it.
-2. Verifies the bot with `getMe`.
-3. Uses a one-time `/start <nonce>` message to identify the authorized Telegram account.
-4. Creates a temporary private topic and calls `sendMessageDraft` to verify Threaded Mode.
-5. Deletes the temporary validation topic.
-6. Writes the configuration files under `$PI_CODING_AGENT_DIR` (normally `~/.pi/agent`).
+### 4. Start Pi
 
-Files:
+Start Pi as usual. The first time a session sends something (a finished answer, a question, a notification), its topic appears in the bot chat. Reply in that topic to talk to the session.
 
-| File | Purpose |
+## Using it
+
+### Session topics
+
+- Each top-level Pi session gets one topic, named after the session and its short ID. Subagents report through their parent and never get their own topic.
+- Reply in a topic to send that text to the session. If the session is not running, the reply waits and is delivered when it reconnects (or wakes it, if wake mode is on).
+- A 👀 reaction means your message was accepted.
+- Only Pi's answer text is sent. Its thinking and raw tool output are not.
+
+### Files
+
+- **To Pi:** send a photo or document inside a session topic. It is saved to `<project>/.pi-telegram/inbox/` and Pi is asked to look at it. Limit: 20 MiB.
+- **From Pi:** Pi can use the `telegram_send_file` tool to send a file from its working directory. Limit: 50 MiB. Files outside the project directory are refused.
+
+### Questions
+
+Pi can use the `telegram_ask_user_question` tool to ask you a question with answer buttons, and it waits for your tap. Questions Pi asks in the terminal (`ask_user_question`) still show up as a notification, but you answer them at the computer.
+
+### Pi commands
+
+Extension commands, prompt templates, and skills from your connected sessions are added to the bot's `/` menu. Names Telegram doesn't allow are converted, for example `/ctx-stats` → `/ctx_stats` and `/skill:frontend-design` → `/skill_frontend_design`. Pick one inside a session topic to run it in that session.
+
+Built-in terminal-only commands such as `/model` or `/settings` are not available remotely.
+
+## Wake mode (optional)
+
+With wake mode, a message in a session's topic starts that exact session if no Pi window has it open. You can also create sessions from the bot's main chat view (**All Topics**).
+
+> [!WARNING]
+> Wake mode lets anyone who controls your Telegram account run Pi unattended: model calls, file edits, and commands. Keep the bot private and limit `wakeAllowedRoots` to directories you trust.
+
+### Enable it
+
+1. Edit `~/.pi/agent/pi-telegram-operator.json`:
+
+   ```json
+   {
+     "wakeMode": true,
+     "wakeDefaultCwd": "/home/me/code",
+     "wakeAllowedRoots": ["/home/me/code"]
+   }
+   ```
+
+   Keep the other keys setup wrote. On Windows, escape backslashes: `"D:\\code"`.
+
+2. Install the background service so wake works even when no Pi is open:
+
+   ```bash
+   node "$HOME/.pi/agent/git/github.com/JohnsonRan/pi-telegram-operator/service.cjs" install
+   ```
+
+Woken sessions open in a new terminal window by default: Windows Console, macOS Terminal.app, or a common Linux terminal. You can keep working in that window when you're back at the computer. If no desktop or terminal is available, Pi runs in the background and the topic tells you why. Set `"wakeOpenTerminal": false` to always run in the background.
+
+### Commands in All Topics
+
+These work in the bot's main chat view (outside any session topic) when wake mode is on:
+
+| Command | What it does |
 | --- | --- |
-| `pi-telegram-operator.secret` | Telegram bot token only |
-| `pi-telegram-operator.json` | Allowed chat/user, localhost broker secret, and port |
-| `pi-telegram-operator.state.json` | Update offset, session/topic mappings, notification mappings, pending replies, and pending questions |
+| `/new <folder> \| <prompt>` | Create a session in that folder and start it with the prompt |
+| `/new <folder>` | Create a session topic without starting Pi |
+| `/new \| <prompt>` | Use `wakeDefaultCwd` as the folder |
+| `/clone <repo-url> [name]` | Clone into `wakeDefaultCwd` and start a session there (`git clone <url>` also works) |
+| `/sessions` | List known sessions, with **Restore + recap** buttons |
+| `/status` | Show broker status |
+| `/update` | Run `pi update --all` (`pi update --all` also works) |
+| `/help` | Show this list |
 
-Example non-secret configuration:
+**Restore + recap** resumes a session and asks Pi for a short summary of where it left off. Telegram doesn't let bots switch your screen to a topic, so open the topic (marked unread) yourself.
 
-```json
-{
-  "chatId": 123456789,
-  "allowedUserId": 123456789,
-  "bridgeSecret": "generated-random-value",
-  "port": 43871,
-  "linkPreview": false,
-  "apiBaseUrl": "https://api.telegram.org",
-  "wakeMode": true,
-  "wakeDefaultCwd": "F:\\",
-  "wakeAllowedRoots": ["F:\\"],
-  "wakePiCommand": "pi",
-  "wakePiCommandArgs": [],
-  "wakeOpenTerminal": true
-}
+Folders must be inside `wakeAllowedRoots`. Symbolic links are resolved before the check.
+
+### Managing the service
+
+```bash
+node "$HOME/.pi/agent/git/github.com/JohnsonRan/pi-telegram-operator/service.cjs" <command>
 ```
 
-`linkPreview` defaults to `false`, which disables URL previews on notifications and persisted assistant messages. Set it to `true` to opt back in. Telegram's ephemeral `sendMessageDraft` method does not expose link preview options.
+| Command | Effect |
+| --- | --- |
+| `install` | Register and start the service (reinstall after changing proxy settings) |
+| `start` / `stop` | Start or stop the service |
+| `status` | Show service status and the log file path |
+| `uninstall` | Stop and remove the service; config and open Pi sessions are kept |
 
-`apiBaseUrl` defaults to `https://api.telegram.org`. Point it at a reverse proxy, mirror, or self-hosted [Bot API server](https://github.com/tdlib/telegram-bot-api) (for example `http://127.0.0.1:8081`) when the official endpoint is unreachable. The bot token is sent to this URL, so only use endpoints you trust. The server's `--local` mode is not supported because it returns local file paths instead of downloadable files. To run setup itself through a custom endpoint, set `TELEGRAM_API_BASE_URL` for that run; setup stores it as `apiBaseUrl`.
+The service is a per-user Scheduled Task (`PiTelegramOperator`) on Windows, a LaunchAgent on macOS, and a systemd user unit on Linux. Stopping or restarting it never closes Pi sessions it opened; they reconnect automatically.
 
-### HTTP proxy
+**After updating TelegraPi, restart the service** (`stop`, then `start`) so it loads the new code. Restart open Pi sessions too.
 
-Node's built-in `fetch` ignores `HTTP_PROXY`/`HTTPS_PROXY` unless `NODE_USE_ENV_PROXY=1` is also set (Node 22.21+ or 24+). Set all of them in the environment that starts Pi, setup, or the daemon:
+## Configuration
+
+Setup writes these files to `~/.pi/agent` (or `PI_CODING_AGENT_DIR`):
+
+| File | Contents |
+| --- | --- |
+| `pi-telegram-operator.secret` | Bot token only |
+| `pi-telegram-operator.json` | Settings (below) |
+| `pi-telegram-operator.state.json` | Topics, pending replies, and other runtime state; don't edit |
+| `pi-telegram-operator.log` | Service log |
+
+Settings in `pi-telegram-operator.json`:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `chatId`, `allowedUserId` | set by setup | The only Telegram chat and user the bot listens to |
+| `bridgeSecret` | generated | Secret used by local Pi processes to talk to each other |
+| `port` | `43871` | Local port for that connection (`127.0.0.1` only) |
+| `linkPreview` | `false` | Show link previews in messages |
+| `apiBaseUrl` | `https://api.telegram.org` | Telegram Bot API endpoint (see [Network](#network)) |
+| `wakeMode` | `false` | Enable [wake mode](#wake-mode-optional) |
+| `wakeDefaultCwd` | `""` | Folder used by `/new \| …` and `/clone` |
+| `wakeAllowedRoots` | `[]` | Folders wake mode may use; required when `wakeMode` is on |
+| `wakeOpenTerminal` | `true` | Open woken sessions in a terminal window |
+| `wakePiCommand` | `"pi"` | Command used to start Pi |
+| `wakePiCommandArgs` | `[]` | Extra arguments for that command |
+
+Rerunning setup keeps your settings as long as you authorize the same Telegram account.
+
+## Network
+
+### Can't reach api.telegram.org?
+
+Set `apiBaseUrl` to a reverse proxy, mirror, or self-hosted [Bot API server](https://github.com/tdlib/telegram-bot-api), for example `http://127.0.0.1:8081`. Your bot token is sent to this address, so use only endpoints you trust. The Bot API server's `--local` mode is not supported. To run setup through the same endpoint, set `TELEGRAM_API_BASE_URL` for that run; setup saves it as `apiBaseUrl`.
+
+### Using an HTTP proxy
+
+Node.js ignores `HTTPS_PROXY` unless `NODE_USE_ENV_PROXY=1` is also set (Node 22.21+ or 24+):
 
 ```bash
 export NODE_USE_ENV_PROXY=1
@@ -104,161 +186,54 @@ export HTTPS_PROXY=http://127.0.0.1:7890
 export NO_PROXY=localhost,127.0.0.1
 ```
 
-The localhost broker bridge is a raw TCP socket and never uses the proxy; keep `127.0.0.1` in `NO_PROXY` if `apiBaseUrl` points at a local Bot API server. On macOS and Linux, `service.cjs install` copies these variables from the installing shell into the LaunchAgent or systemd unit, so rerun `install` after changing them; credentials in a proxy URL are then stored in that service file, which is written with owner-only (0600) permissions. On Windows the Scheduled Task uses your user environment variables, so set them with `setx` (or System Properties) and restart the service.
+Set these wherever Pi and setup are started. For the background service:
 
-## Wake daemon
+- **macOS / Linux:** set them in your shell, then run `service.cjs install` again. They are saved into the service file, which only you can read (permissions 0600).
+- **Windows:** set them as user environment variables (`setx NODE_USE_ENV_PROXY 1`, and so on), then restart the service.
 
-Set `wakeMode` to `true` to let Telegram start Pi when no interactive Pi process owns the target session. `wakeDefaultCwd` is used by `/new | <prompt>`, and every requested working directory must resolve inside one of the `wakeAllowedRoots`. Symbolic links and junctions are resolved before the allowlist check.
+## Troubleshooting
 
-Wake requests open Pi in a foreground terminal by default. Interactive mode omits `--print`, keeps the Pi TUI running after the Telegram turn, and lets you continue the same session from the keyboard when you return to the computer.
-
-- Windows opens a new console window through PowerShell 7 (`pwsh`) when available, with Windows PowerShell as a fallback.
-- macOS activates Terminal.app and opens a new tab.
-- Linux detects `x-terminal-emulator`, GNOME Terminal, Konsole, xfce4-terminal, or xterm in that order.
-
-If no graphical desktop or supported terminal is available, Pi automatically falls back to headless mode and reports the reason in Telegram. Desktop focus-stealing rules may cause the new terminal to flash in the taskbar or dock instead of taking focus. Set `wakeOpenTerminal` to `false` to always use the headless one-shot behavior:
-
-```text
-pi --session-id <id> --name <name> --print --approve <prompt>
-```
-
-Only the configured `allowedUserId` can issue wake requests. One wake process may run per session; additional messages are delivered through the normal authenticated broker connection.
-
-Install the per-user service from the installed checkout:
-
-```bash
-node "$HOME/.pi/agent/git/github.com/JohnsonRan/pi-telegram-operator/service.cjs" install
-```
-
-Stop the daemon and remove the per-user service registration:
-
-```bash
-node "$HOME/.pi/agent/git/github.com/JohnsonRan/pi-telegram-operator/service.cjs" uninstall
-```
-
-This keeps the installed checkout, configuration, daemon log, and Pi sessions previously opened by wake mode.
-
-The install command selects the native service manager for the current platform:
-
-- Windows: hidden `PiTelegramOperator` per-user Scheduled Task (no persistent console window)
-- macOS: `~/Library/LaunchAgents/com.johnsonran.pi-telegram-operator.plist`
-- Linux: `~/.config/systemd/user/pi-telegram-operator.service`
-
-Service lifecycle commands are `install`, `start`, `stop`, `status`, and `uninstall`. The daemon writes bounded diagnostics to `~/.pi/agent/pi-telegram-operator.log`; `status` also prints the resolved log path. If another broker owns the port, the daemon waits and takes ownership automatically after that process exits. Service stop, restart, reinstall, and update operations terminate only the broker daemon; Pi sessions previously opened by wake mode remain running and reconnect to the replacement broker.
-
-A running daemon keeps its loaded code after the package checkout updates. Restart it before testing a newly installed version:
-
-```bash
-node "$HOME/.pi/agent/git/github.com/JohnsonRan/pi-telegram-operator/service.cjs" stop
-node "$HOME/.pi/agent/git/github.com/JohnsonRan/pi-telegram-operator/service.cjs" start
-```
-
-All Topics is command-only:
-
-```text
-/update
-pi update --all
-/clone https://github.com/owner/repository.git
-/clone git@github.com:owner/repository.git local-name
-git clone https://github.com/owner/repository.git
-/new F:\\project | inspect this project
-/new F:\\project
-/new | use the configured default directory
-/sessions
-/status
-/help
-```
-
-`/update` and the equivalent `pi update --all` form run the exact Pi update command without a shell, return bounded command output to Telegram, and remind you to restart running Pi sessions so updated extensions are loaded.
-
-`/clone` and the equivalent `git clone` form clone one HTTPS or SSH repository into `wakeDefaultCwd`, create a private session topic for the repository, and start Pi with the cloned repository as its working directory. An optional destination must be a single safe directory name; absolute paths, parent traversal, shell operators, and arbitrary Git options are rejected. The configured default directory must remain inside `wakeAllowedRoots`.
-
-The `/help`, `/status`, and `/sessions` responses include inline buttons for switching between the control views and refreshing live status without typing another command. Known sessions also get `Restore + recap` buttons: pressing one verifies the saved topic, recreates it if it was deleted, resumes the exact host Pi session, and asks Pi to post a concise recap of the recovered objective, decisions, completed work, and next steps. Telegram does not provide a Bot API method or supported private-topic deep link that can force the client to navigate into an existing topic, so the restored topic is marked unread and the callback tells the user to open it. Callback actions are restricted to the configured chat and allowed user.
-
-Messages in an existing session topic wake that exact session. Ordinary unthreaded text never falls back to a globally "latest" session.
-
-## Rich Telegram interaction
-
-- Send a document or photo inside a session topic to save it under `<cwd>/.pi-telegram/inbox/` and ask that exact Pi session to inspect it. Downloads are limited to 20 MiB and sanitized filenames never escape the session directory.
-- Pi can call `telegram_send_file` to return a generated document, report, archive, or image from its working directory. Uploads are limited to 50 MiB and paths outside the session directory are rejected.
-- Every session topic gets one pinned status dashboard that is edited in place with connection, working, question, upload, and ready states.
-- Dashboard and notification buttons provide Continue, Stop, Retry, and Refresh status actions. Stop calls Pi's abort API directly instead of injecting a textual command.
-- Pi can call `telegram_ask_user_question` to render multiple-choice Telegram buttons and wait for the selected answer in the same tool call. Regular local `ask_user_question` prompts still produce a notification but remain local to Pi's terminal UI.
-- Accepted Telegram messages receive a non-blocking 👀 reaction after they are delivered, queued, or used to start the matching Pi session. Telegram does not expose a normal Bot API method for changing the client's true unread state.
-- Telegram chat actions show typing and document-upload activity while Pi is working.
-
-## Pi command menu
-
-For each connected session, the extension reads `pi.getCommands()` and synchronizes invokable extension commands, prompt templates, and skills into Telegram with `setMyCommands`. Names that Telegram cannot represent directly are converted to stable lowercase aliases, for example `/ctx-stats` becomes `/ctx_stats` and `/skill:frontend-design` becomes `/skill_frontend_design`.
-
-Selecting an alias inside a session topic restores the original Pi command and dispatches it with `expandPromptTemplates: true`. The command mapping is stored with the topic, so it also works when that topic must wake a stopped session. Non-command wake prompts are transferred through the child environment instead of being exposed as CLI arguments.
-
-Telegram permits at most 100 bot commands. Wake controls occupy four entries, and up to 96 discovered Pi commands are published. Built-in interactive-only TUI commands such as `/model`, `/settings`, and `/hotkeys` are intentionally excluded because Pi does not expose them through `getCommands()` and they cannot execute through a remote prompt. Commands that open custom terminal UI may still require an interactive Pi window; prompt templates, skills, and headless extension commands work normally.
-
-Wake mode permits unattended model calls, file writes, and command execution. Keep the bot private and restrict `wakeAllowedRoots` to trusted directories.
-
-## pi-notify integration
-
-This extension listens directly to the neutral `pi:semantic-hook:v1` bus.
-
-Recognized hooks:
-
-- `agent-notify` with `TITLE` and `CONTENT`
-- `user-ready` with `STOP_KIND` and `REASON`
-
-It also listens directly for `ask_user_question` tool starts. `pi-notify` may remain installed for BEL/OSC notifications and for its optional `agent_notify` tool, but its Telegram command action should be removed to avoid duplicate pushes.
-
-## Message routing
-
-```text
-Pi session A -> Telegram topic A -> reply -> Pi session A
-Pi session B -> Telegram topic B -> reply -> Pi session B
-```
-
-A single localhost broker owns Telegram long polling. Every Pi process connects to it using a random secret. If the broker-owning Pi process exits, another connected process can become the broker after reconnecting.
-
-Reply delivery uses ACKs. A reply stays in durable state until the target Pi process confirms that `sendUserMessage()` accepted it. Notification mappings and undelivered replies expire after 30 days and are pruned every six hours; topic mappings are retained so resumed Pi sessions continue using their existing Telegram topics.
-
-## Streaming
-
-Assistant text is observed through Pi's `message_start`, `message_update`, and `message_end` lifecycle events.
-
-- `sendMessageDraft` updates are throttled to avoid one HTTP request per token and back off once when Telegram returns `429 retry_after`.
-- Drafts use the session's private topic.
-- Pi Markdown is converted to Telegram's supported HTML subset on every draft update, so partial Markdown remains balanced and safe.
-- Supported formatting includes headings, bold, italic, strikethrough, spoilers, inline/fenced code, links, blockquotes, and readable list markers.
-- Raw HTML and unsafe link protocols are escaped rather than trusted.
-- If Telegram rejects formatted entities, delivery retries once as plain text.
-- The final response is persisted with `sendMessage`.
-- Responses longer than Telegram's message limit are split at line boundaries when possible.
-- Thinking blocks and tool-call payloads are not forwarded; only assistant text content is streamed.
+| Problem | What to check |
+| --- | --- |
+| No topic appears | Did you restart Pi after setup? Is Threaded Mode enabled in BotFather? |
+| "No active Pi session is available" | You wrote in All Topics without wake mode. Reply inside a session topic instead. |
+| Replies say "queued until the target Pi session reconnects" | That session isn't running. Open it in Pi, or enable wake mode. |
+| Every notification arrives twice | If you use `pi-notify`, remove its Telegram command action. TelegraPi already reads its notifications. |
+| Setup says the broker is running | Close all Pi sessions and stop the service, then rerun setup. |
+| Service misbehaves after an update | Restart it with `service.cjs stop` and `start`, then check `status` and the log file. |
 
 ## Security
 
-- Use a dedicated bot.
-- The configured `chatId` and `allowedUserId` must both match incoming messages.
-- The broker binds only to `127.0.0.1`.
-- Local broker frames require the generated `bridgeSecret`.
-- Do not commit any files from `~/.pi/agent` to this repository.
+- Only messages from the configured chat **and** user are accepted; everything else is ignored.
+- Local Pi processes talk over `127.0.0.1` only and must present `bridgeSecret`.
+- Files are only read from and written to the session's working directory.
+- Keep the files in `~/.pi/agent` private and never commit them.
+
+## How it works
+
+One Pi process (or the background service) acts as a local broker. It holds the only Telegram connection (long polling) and routes messages by topic. Every other Pi process connects to it over `127.0.0.1`. If the broker process exits, another process takes over automatically. Your replies are saved to disk until the target session confirms it received them. Old notification links and undelivered replies are removed after 30 days; topics are kept.
+
+TelegraPi also listens to the `pi:semantic-hook:v1` event bus (`agent-notify`, `user-ready`), so notifications from `pi-notify` and similar extensions are forwarded to the session topic.
 
 ## Development
 
 ```bash
 npm install
-npm run check
+npm run check   # type check, syntax check, tests
 ```
 
-GitHub Actions runs the same check on Windows, macOS, and Linux. The Windows job also executes the hidden VBS daemon launcher and verifies that it waits for the child process and preserves its exit code.
+CI runs the same check on Windows, macOS, and Linux.
 
-The runtime is organized by responsibility:
-
-- `src/runtime.cjs` is the public composition facade.
-- `src/bridge/` owns Pi-side broker communication and framing.
-- `src/broker/` owns the local leader, connected clients, and durable routing state.
-- `src/telegram/` owns Telegram HTTP, routing, formatting, controls, cloning, and updates.
-- `src/session/` owns assistant streaming and live agent status.
-- `src/wake/` owns wake processes, terminal launch, and wake payloads.
-- `src/shared/` and `src/service/` contain shared settings, paths, time formatting, and daemon logging.
+| Path | Responsibility |
+| --- | --- |
+| `index.ts` | Pi extension entry: tools, notifications, hooks |
+| `src/bridge/` | Pi-side connection to the local broker |
+| `src/broker/` | Local broker, connected clients, durable state |
+| `src/telegram/` | Telegram API, routing, formatting, controls, files |
+| `src/session/` | Streaming and live status |
+| `src/wake/` | Launching woken sessions and terminals |
+| `src/shared/`, `src/service/` | Settings, paths, helpers, daemon logging |
+| `setup.cjs`, `service.cjs`, `daemon.cjs` | Setup, service manager, background daemon |
 
 ## License
 
