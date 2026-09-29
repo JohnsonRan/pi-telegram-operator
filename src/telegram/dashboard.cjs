@@ -1,3 +1,4 @@
+const { queuePersist } = require("../broker/state.cjs");
 const { enqueueKeyed } = require("../shared/queue.cjs");
 const { formatLocalTimestamp } = require("../shared/time.cjs");
 const { errorMessage, telegramCall } = require("./api.cjs");
@@ -77,6 +78,11 @@ async function syncTopicDashboard(state, topic, update = {}) {
   });
 }
 
+// Fire-and-forget dashboard refresh that persists the pinned message id.
+function updateDashboard(state, topic, update) {
+  return syncTopicDashboard(state, topic, update).then(() => queuePersist(state)).catch(() => {});
+}
+
 async function sendTopicChatAction(state, topic, action = "typing") {
   const previous = state.chatActionSentAt.get(topic.sessionId) || 0;
   if (Date.now() - previous < CHAT_ACTION_THROTTLE_MS) return false;
@@ -96,4 +102,5 @@ module.exports = Object.freeze({
   sendTopicChatAction,
   sessionActionData,
   syncTopicDashboard,
+  updateDashboard,
 });

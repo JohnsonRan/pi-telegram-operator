@@ -6,7 +6,7 @@ const { MAX_PENDING_REPLIES, MAX_TOPICS, pruneExpiredBrokerState, queuePersist }
 const { CONTROL_COMMANDS, CONTROL_PANEL_COMMANDS, RESTORE_CONTEXT_PROMPT, controlPanel, parseControlCallback, parseRestoreCallback, topicName, translateTelegramCommand } = require("./control.cjs");
 const { splitMarkdown } = require("./format.cjs");
 const { attachmentFromMessage, downloadTelegramAttachment } = require("./files.cjs");
-const { parseSessionAction, sendTopicChatAction, syncTopicDashboard } = require("./dashboard.cjs");
+const { parseSessionAction, sendTopicChatAction, syncTopicDashboard, updateDashboard } = require("./dashboard.cjs");
 const { parseQuestionCallback } = require("./questions.cjs");
 const { cloneRepository, parseGitCloneCommand } = require("./git-clone.cjs");
 const { parsePiUpdateCommand, runPiUpdate } = require("./pi-update.cjs");
@@ -39,8 +39,7 @@ async function ensureTopic(state, sessionId, cwd, sessionName) {
     };
     state.topics.set(sessionId, topic);
     await queuePersist(state);
-    syncTopicDashboard(state, topic, { phase: "Waiting", detail: "Session topic created" })
-      .then(() => queuePersist(state)).catch(() => {});
+    updateDashboard(state, topic, { phase: "Waiting", detail: "Session topic created" });
     syncTelegramCommandMenu(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot sync bot commands: ${errorMessage(error)}`));
     return topic;
   })().finally(() => state.topicPromises.delete(sessionId));
@@ -579,18 +578,18 @@ async function handleCallbackQuery(state, query, options = {}) {
 
   if (actionTopic) {
     if (sessionAction.action === "refresh") {
-      await syncTopicDashboard(state, actionTopic, {
+      await updateDashboard(state, actionTopic, {
         phase: connectedTarget(state, actionTopic.sessionId) ? "Connected" : "Disconnected",
         detail: connectedTarget(state, actionTopic.sessionId) ? "Pi session connected" : "Pi session is not connected",
-      }).then(() => queuePersist(state)).catch(() => {});
+      });
       return;
     }
     if (sessionAction.action === "stop") {
       const stopped = sendSessionControl(state, actionTopic.sessionId, "stop");
-      await syncTopicDashboard(state, actionTopic, {
+      await updateDashboard(state, actionTopic, {
         phase: stopped ? "Stop requested" : "Disconnected",
         detail: stopped ? "Stopping the active Pi turn" : "Pi session is not connected",
-      }).then(() => queuePersist(state)).catch(() => {});
+      });
       return;
     }
     const text = sessionAction.action === "continue" ? "/continue" : "Retry the last failed operation.";
@@ -601,8 +600,7 @@ async function handleCallbackQuery(state, query, options = {}) {
       chat: { id: state.secret.chatId },
       from: { id: state.secret.allowedUserId, is_bot: false },
     });
-    await syncTopicDashboard(state, actionTopic, { phase: "Command sent", detail: text })
-      .then(() => queuePersist(state)).catch(() => {});
+    await updateDashboard(state, actionTopic, { phase: "Command sent", detail: text });
     return;
   }
 

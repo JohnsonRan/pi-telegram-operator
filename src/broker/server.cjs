@@ -6,7 +6,7 @@ const { MAX_PENDING_QUESTIONS, pruneExpiredBrokerState, queuePersist, readBroker
 const { formatWakeExitDetail, normalizePiCommands } = require("../telegram/control.cjs");
 const { escapeHtml, renderTelegramChunkPairs, renderTelegramHtml, splitMarkdown } = require("../telegram/format.cjs");
 const { sendSessionArtifact } = require("../telegram/files.cjs");
-const { dashboardKeyboard, sendTopicChatAction, syncTopicDashboard } = require("../telegram/dashboard.cjs");
+const { dashboardKeyboard, sendTopicChatAction, updateDashboard } = require("../telegram/dashboard.cjs");
 const { questionKeyboard } = require("../telegram/questions.cjs");
 const { AGENT_DIR } = require("../shared/paths.cjs");
 const { errorMessage, telegramCall, telegramFormattedCall } = require("../telegram/api.cjs");
@@ -93,7 +93,7 @@ function handleStreamRequest(state, client, message) {
         const html = renderTelegramHtml(preview);
         sendTopicChatAction(state, topic).catch(() => {});
         if (topic.dashboardStatus?.phase !== "Working") {
-          syncTopicDashboard(state, topic, { phase: "Working", detail: preview.split("\n")[0] }).then(() => queuePersist(state)).catch(() => {});
+          updateDashboard(state, topic, { phase: "Working", detail: preview.split("\n")[0] });
         }
         await telegramFormattedCall(state.secret, "sendMessageDraft", {
           chat_id: state.secret.chatId,
@@ -117,7 +117,7 @@ function handleStreamRequest(state, client, message) {
             }, chunk.source);
           }
         }
-        syncTopicDashboard(state, topic, { phase: "Ready", detail: "Waiting for input" }).then(() => queuePersist(state)).catch(() => {});
+        updateDashboard(state, topic, { phase: "Ready", detail: "Waiting for input" });
       }
     },
   ));
@@ -186,8 +186,7 @@ function handleBrokerRequest(state, client, message) {
         syncTelegramCommandMenu(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot sync bot commands: ${errorMessage(error)}`));
       }
       if (topicChanged || commandsChanged) queuePersist(state).catch(() => {});
-      syncTopicDashboard(state, topic, { phase: "Connected", detail: client.sessionName || "Pi session connected" })
-        .then(() => queuePersist(state)).catch(() => {});
+      updateDashboard(state, topic, { phase: "Connected", detail: client.sessionName || "Pi session connected" });
     }
     client.registered = true;
     if (!client.wakeChild && state.wakeReservations.has(client.sessionId)) {
@@ -288,8 +287,7 @@ function handleBrokerRequest(state, client, message) {
       });
       while (state.pendingQuestions.size > MAX_PENDING_QUESTIONS) state.pendingQuestions.delete(state.pendingQuestions.keys().next().value);
       await queuePersist(state);
-      syncTopicDashboard(state, topic, { phase: "Waiting for answer", detail: String(message.question || "Pi needs your input") })
-        .then(() => queuePersist(state)).catch(() => {});
+      updateDashboard(state, topic, { phase: "Waiting for answer", detail: String(message.question || "Pi needs your input") });
       return sent;
     })).catch((error) => {
       sendLine(client.socket, { type: "result", requestId: message.requestId, ok: false, error: errorMessage(error) });
@@ -303,9 +301,9 @@ function handleBrokerRequest(state, client, message) {
       return;
     }
     sendTopicChatAction(state, topic, "upload_document").catch(() => {});
-    syncTopicDashboard(state, topic, { phase: "Uploading artifact", detail: String(message.path || "") }).catch(() => {});
+    updateDashboard(state, topic, { phase: "Uploading artifact", detail: String(message.path || "") });
     trackTask(state, sendSessionArtifact(state.secret, { ...topic, cwd: client.cwd }, String(message.path || ""), String(message.caption || ""))).then((sent) => {
-      syncTopicDashboard(state, topic, { phase: "Ready", detail: "Artifact sent" }).then(() => queuePersist(state)).catch(() => {});
+      updateDashboard(state, topic, { phase: "Ready", detail: "Artifact sent" });
       sendLine(client.socket, { type: "result", requestId: message.requestId, ok: true, messageId: sent.message_id });
     }).catch((error) => {
       sendLine(client.socket, { type: "result", requestId: message.requestId, ok: false, error: errorMessage(error) });
@@ -452,8 +450,7 @@ async function startLocalLeader(secret) {
         state.clientsBySession.delete(client.sessionId);
         const topic = state.topics.get(client.sessionId);
         if (!topic) state.sessionCommands.delete(client.sessionId);
-        else if (!state.closed) syncTopicDashboard(state, topic, { phase: "Disconnected", detail: "Pi session is not connected" })
-          .then(() => queuePersist(state)).catch(() => {});
+        else if (!state.closed) updateDashboard(state, topic, { phase: "Disconnected", detail: "Pi session is not connected" });
       }
     });
     socket.on("error", () => {});
