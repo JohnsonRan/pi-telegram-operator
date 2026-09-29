@@ -188,7 +188,8 @@ function handleClientMessage(state, message) {
     return;
   }
   if (message?.type === "control" && message.sessionId === state.sessionId && message.action === "stop") {
-    state.pi.abort?.();
+    // abort lives on the extension context, not on the extension API.
+    state.ctx?.abort?.();
     return;
   }
   if (message?.type !== "reply" || typeof message.text !== "string" || typeof message.deliveryId !== "string") return;
@@ -389,4 +390,13 @@ function getClientState(pi) {
   return clientStates.get(pi);
 }
 
-module.exports = Object.freeze({ connectClient, getClientState, initializeState, requestArtifact, requestBroker, requestNotification, requestQuestion });
+module.exports = Object.freeze({
+  connectClient,
+  getClientState,
+  initializeState,
+  requestArtifact,
+  requestBroker,
+  requestNotification,
+  requestQuestion,
+  __test: Object.freeze({ handleClientMessage }),
+});
