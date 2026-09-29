@@ -61,8 +61,12 @@ function renderInline(value, allowLinks = true) {
   }).join("");
 }
 
+function codeLanguage(value) {
+  return String(value ?? "").trim().replace(/[^A-Za-z0-9_+-]/g, "").slice(0, 40);
+}
+
 function renderCodeBlock(language, lines) {
-  const normalized = String(language ?? "").trim().replace(/[^A-Za-z0-9_+-]/g, "").slice(0, 40);
+  const normalized = codeLanguage(language);
   const className = normalized ? ` class="language-${escapeHtml(normalized)}"` : "";
   return `<pre><code${className}>${escapeHtml(lines.join("\n"))}</code></pre>`;
 }
@@ -143,15 +147,18 @@ function preferredSplitIndex(source) {
   return Math.max(1, midpoint);
 }
 
-// Returns the opening fence line when source ends inside an unclosed code block.
-function unclosedFence(source) {
+// Finds the opening fence of a code block still open at the end of source.
+function openFence(source) {
   let open;
+  let offset = 0;
   for (const line of source.split("\n")) {
     if (open) {
       if (/^\s*```\s*$/.test(line)) open = undefined;
-    } else if (/^\s*```\s*([^`]*)$/.test(line)) {
-      open = line.trim();
+    } else {
+      const match = line.match(/^\s*```\s*([^`]*)$/);
+      if (match) open = { start: offset, end: offset + line.length, reopen: `\`\`\`${codeLanguage(match[1])}` };
     }
+    offset += line.length + 1;
   }
   return open;
 }
@@ -170,15 +177,25 @@ function splitMarkdown(value, renderedLimit = MAX_SOURCE_CHARS) {
     left = source.slice(0, midpoint);
     right = source.slice(midpoint);
   }
-  // Reopen a code block cut in half so the tail still renders as code;
-  // renderTelegramHtml closes the unterminated head on its own.
-  const fence = unclosedFence(left);
-  if (fence) {
-    // A split right after the opening fence would leave an empty code block.
-    const lastBreak = left.lastIndexOf("\n");
-    if (lastBreak > 0 && left.slice(lastBreak + 1).trim() === fence) left = left.slice(0, lastBreak);
-    right = `${fence}\n${right}`;
+  let fence = openFence(left);
+  if (fence && fence.end === left.length) {
+    // The split landed right after an opening fence; never emit an empty block.
+    if (fence.start > 0) {
+      right = `${left.slice(fence.start)}\n${right}`;
+      left = left.slice(0, fence.start).replace(/\n$/, "");
+      fence = undefined;
+    } else {
+      // Nothing precedes the fence, so split the code body itself.
+      const midpoint = Math.max(1, Math.floor(right.length / 2));
+      left = `${fence.reopen}\n${right.slice(0, midpoint)}`;
+      right = right.slice(midpoint);
+      fence = openFence(left);
+    }
   }
+  // Reopen a code block cut in half so the tail still renders as code;
+  // renderTelegramHtml closes the unterminated head on its own. The short
+  // canonical fence keeps every recursive piece smaller than its parent.
+  if (fence) right = `${fence.reopen}\n${right}`;
   return [
     ...splitMarkdown(left, renderedLimit),
     ...splitMarkdown(right, renderedLimit),

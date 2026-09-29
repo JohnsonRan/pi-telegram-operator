@@ -68,6 +68,26 @@ test("does not leave an empty code block when splitting after an opening fence",
   assert.ok(chunks.some((chunk) => chunk.html.includes("<pre><code class=\"language-js\">c")));
 });
 
+test("splits code blocks with very long fence lines without recursing forever", () => {
+  for (const markdown of [
+    `\`\`\`${"a".repeat(5000)}\n${"x\n".repeat(2000)}`,
+    `\`\`\`${"a".repeat(1500)}\n${"y".repeat(4000)}`,
+    `\n\`\`\`js\n${"z".repeat(4000)}`,
+  ]) {
+    const chunks = renderTelegramChunkPairs(markdown);
+    assert.ok(chunks.length >= 2);
+    assert.ok(chunks.every((chunk) => renderedTextLength(chunk.html) <= 3500));
+    assert.ok(chunks.every((chunk) => !/<code[^>]*><\/code>/.test(chunk.html)));
+  }
+});
+
+test("keeps a code line that repeats the opening fence text", () => {
+  const code = [`${"q".repeat(3490)}`, "```js", `${"r".repeat(3490)}`].join("\n");
+  const chunks = renderTelegramChunkPairs(`\`\`\`js\n${code}\n\`\`\``);
+  // Fence lines never reach the HTML, so this can only be the content line.
+  assert.ok(chunks.some((chunk) => chunk.html.includes("```js")));
+});
+
 test("rejects unsafe links and chunks by rendered Telegram length", () => {
   assert.equal(safeUrl("javascript:alert(1)"), undefined);
   assert.equal(safeUrl("tg://resolve?domain=unsafe"), undefined);

@@ -95,7 +95,8 @@ function handleStreamRequest(state, client, message) {
         const html = renderTelegramHtml(preview);
         sendTopicChatAction(state, topic).catch(() => {});
         if (topic.dashboardStatus?.phase !== "Working") {
-          updateDashboard(state, topic, { phase: "Working", detail: tail.split("\n")[0] });
+          const detail = tail.split("\n").find((line) => line.trim() && !/^\s*```/.test(line)) || "";
+          updateDashboard(state, topic, { phase: "Working", detail });
         }
         await telegramFormattedCall(state.secret, "sendMessageDraft", {
           chat_id: state.secret.chatId,
