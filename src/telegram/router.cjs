@@ -16,6 +16,7 @@ const { parseControlCommand, resolveWakeCwd } = require("../wake/launcher.cjs");
 const WAKE_REGISTRATION_TIMEOUT_MS = 15_000;
 const WAKE_STOP_TIMEOUT_MS = 5_000;
 const WAKE_STABILITY_TIMEOUT_MS = 1_500;
+const MAX_UPDATE_ATTEMPTS = 3;
 
 async function ensureTopic(state, sessionId, cwd, sessionName) {
   const existing = state.topics.get(sessionId);
@@ -376,12 +377,17 @@ async function handleTelegramMessage(state, message) {
   if (typeof message.text !== "string") return;
   if (message.text.trim().startsWith("/start")) return;
   if (state.secret.wakeMode && !threadIsKnown) {
-    try {
-      await handleControlMessage(state, message);
-      acknowledgeTelegramMessage(state, message).catch(() => {});
-    } catch (error) {
-      await sendBrokerText(state, `Command failed: ${errorMessage(error)}`, replyOptions).catch(() => {});
-    }
+    // /update and /clone can run for minutes; polling must keep serving other topics.
+    const task = (async () => {
+      try {
+        await handleControlMessage(state, message);
+        acknowledgeTelegramMessage(state, message).catch(() => {});
+      } catch (error) {
+        await sendBrokerText(state, `Command failed: ${errorMessage(error)}`, replyOptions).catch(() => {});
+      }
+    })();
+    state.activeTasks?.add(task);
+    task.finally(() => state.activeTasks?.delete(task));
     return;
   }
 
@@ -598,8 +604,16 @@ async function handleCallbackQuery(state, query, options = {}) {
 
 async function processTelegramUpdate(state, update, options = {}) {
   if (!Number.isSafeInteger(update?.update_id)) return false;
-  if (update.message) await (options.handleTelegramMessage || handleTelegramMessage)(state, update.message);
-  if (update.callback_query) await (options.handleCallbackQuery || handleCallbackQuery)(state, update.callback_query);
+  try {
+    if (update.message) await (options.handleTelegramMessage || handleTelegramMessage)(state, update.message);
+    if (update.callback_query) await (options.handleCallbackQuery || handleCallbackQuery)(state, update.callback_query);
+  } catch (error) {
+    // Retry transient failures, but never let one update block polling forever.
+    if (state.failedUpdate?.id !== update.update_id) state.failedUpdate = { id: update.update_id, attempts: 0 };
+    if (++state.failedUpdate.attempts < MAX_UPDATE_ATTEMPTS) throw error;
+    warn(`Skipping Telegram update ${update.update_id} after ${MAX_UPDATE_ATTEMPTS} failures`)(error);
+  }
+  state.failedUpdate = undefined;
   state.offset = Math.max(state.offset, update.update_id + 1);
   await (options.queuePersist || queuePersist)(state);
   return true;
