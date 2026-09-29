@@ -17,8 +17,8 @@ async function notify(pi, ctx, title, body) {
   await requestNotification(await initializeState(pi, ctx), title, body);
 }
 
-async function askQuestion(pi, ctx, question, options) {
-  const result = await requestQuestion(await initializeState(pi, ctx), question, options);
+async function askQuestion(pi, ctx, question, options, signal) {
+  const result = await requestQuestion(await initializeState(pi, ctx), question, options, signal);
   return String(result.answer || "");
 }
 

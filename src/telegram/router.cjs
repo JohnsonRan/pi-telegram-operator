@@ -521,7 +521,7 @@ async function handleCallbackQuery(state, query, options = {}) {
     if (!deliverAnswer(state, pendingQuestion, selectedAnswer)) {
       await telegramCall(state.secret, "answerCallbackQuery", {
         callback_query_id: query.id,
-        text: "Pi is disconnected. This answer will be delivered if the question reconnects.",
+        text: "Pi is disconnected. This answer will be delivered when Pi reconnects.",
         show_alert: true,
       }).catch(() => {});
       return;

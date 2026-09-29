@@ -67,12 +67,15 @@ function registerClient(state) {
   });
 }
 
-function rejectPending(state, error) {
-  for (const pending of state.pending.values()) {
+// Durable requests (questions) survive a disconnect: the broker keeps them
+// and replays the answer when this client registers again.
+function rejectPending(state, error, includeDurable = true) {
+  for (const [requestId, pending] of state.pending) {
+    if (pending.durable && !includeDurable) continue;
+    state.pending.delete(requestId);
     clearTimeout(pending.timer);
     pending.reject(error);
   }
-  state.pending.clear();
 }
 
 function scheduleReconnect(state) {
@@ -126,7 +129,7 @@ async function connectClient(state) {
           state.handshake?.reject(new Error("Telegram bridge disconnected during handshake"));
           state.connected = false;
           state.socket = undefined;
-          rejectPending(state, new Error("Telegram bridge disconnected"));
+          rejectPending(state, new Error("Telegram bridge disconnected"), false);
           scheduleReconnect(state);
         });
         socket.on("error", () => {});
@@ -326,16 +329,25 @@ function clientStateFor(pi, ctx) {
   return state;
 }
 
-async function requestBroker(state, payload, timeoutLabel, timeoutMs = REQUEST_TIMEOUT_MS) {
+async function requestBroker(state, payload, timeoutLabel, timeoutMs = REQUEST_TIMEOUT_MS, options = {}) {
+  const { durable = false, signal } = options;
+  signal?.throwIfAborted();
   await connectClient(state);
+  signal?.throwIfAborted();
+  if (!state.socket || state.socket.destroyed) throw new Error("Telegram bridge disconnected");
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const settle = (callback) => (value) => {
+      clearTimeout(timer);
       state.pending.delete(requestId);
-      reject(new Error(`${timeoutLabel} timed out`));
-    }, timeoutMs);
+      signal?.removeEventListener("abort", onAbort);
+      callback(value);
+    };
+    const onAbort = settle(() => reject(signal.reason));
+    const timer = setTimeout(settle(() => reject(new Error(`${timeoutLabel} timed out`))), timeoutMs);
     timer.unref?.();
-    state.pending.set(requestId, { resolve, reject, timer });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    state.pending.set(requestId, { resolve: settle(resolve), reject: settle(reject), timer, durable });
     sendLine(state.socket, {
       ...payload,
       auth: state.secret.bridgeSecret,
@@ -363,12 +375,12 @@ function requestArtifact(state, filePath, caption) {
   }, "Telegram artifact upload", 75_000);
 }
 
-function requestQuestion(state, question, options) {
+function requestQuestion(state, question, options, signal) {
   return requestBroker(state, {
     type: "question",
     question: String(question || "Pi needs your input"),
     options: Array.isArray(options) ? options.map(String) : [],
-  }, "Telegram question", 24 * 60 * 60 * 1_000);
+  }, "Telegram question", 24 * 60 * 60 * 1_000, { durable: true, signal });
 }
 
 async function initializeState(pi, ctx) {
@@ -398,5 +410,5 @@ module.exports = Object.freeze({
   requestBroker,
   requestNotification,
   requestQuestion,
-  __test: Object.freeze({ handleClientMessage }),
+  __test: Object.freeze({ handleClientMessage, rejectPending }),
 });

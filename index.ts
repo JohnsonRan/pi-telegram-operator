@@ -9,7 +9,7 @@ const { decodeWakePayload, WAKE_SENTINEL } = require("./src/wake/payload.cjs") a
   WAKE_SENTINEL: string;
 };
 const runtime = require("./src/runtime.cjs") as {
-  askQuestion(pi: ExtensionAPI, ctx: ExtensionContext, question: string, options: string[]): Promise<string>;
+  askQuestion(pi: ExtensionAPI, ctx: ExtensionContext, question: string, options: string[], signal?: AbortSignal): Promise<string>;
   attach(pi: ExtensionAPI): void;
   notify(pi: ExtensionAPI, ctx: ExtensionContext, title: string, body: string): Promise<void>;
   sendFile(pi: ExtensionAPI, ctx: ExtensionContext, filePath: string, caption?: string): Promise<void>;
@@ -100,8 +100,8 @@ export default function telegraPi(pi: ExtensionAPI): void {
       question: Type.String({ minLength: 1, description: "Question shown to the user" }),
       options: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 10, description: "Selectable answers" }),
     }, { additionalProperties: false }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const answer = await runtime.askQuestion(pi, ctx, params.question, params.options);
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const answer = await runtime.askQuestion(pi, ctx, params.question, params.options, signal);
       return {
         content: [{ type: "text", text: `The user selected: ${answer}` }],
         details: { question: params.question, answer },
