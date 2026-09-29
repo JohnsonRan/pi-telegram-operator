@@ -14,9 +14,11 @@ function normalizeApiBaseUrl(value) {
   } catch {
     url = undefined;
   }
-  if (!url || !["http:", "https:"].includes(url.protocol) || url.search || url.hash) {
+  if (!url || !["http:", "https:"].includes(url.protocol) || /[?#]/.test(text)) {
     throw new Error("apiBaseUrl must be an http(s) URL without query or fragment");
   }
+  // fetch refuses credentialed URLs and echoes the whole URL, bot token included.
+  if (url.username || url.password) throw new Error("apiBaseUrl must not contain a username or password");
   return text;
 }
 

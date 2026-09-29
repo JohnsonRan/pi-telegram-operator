@@ -7,6 +7,11 @@ function telegramUrl(secret, path) {
   return `${secret.apiBaseUrl || DEFAULT_API_BASE_URL}/${path}`;
 }
 
+// Network errors can quote the request URL, which contains the bot token.
+function redactToken(secret, text) {
+  return secret.botToken ? String(text).split(secret.botToken).join("<bot-token>") : String(text);
+}
+
 async function postTelegram(secret, method, init, timeoutMs, externalSignal) {
   let response;
   try {
@@ -17,7 +22,7 @@ async function postTelegram(secret, method, init, timeoutMs, externalSignal) {
       signal: externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal,
     });
   } catch (error) {
-    throw new Error(`Telegram ${method} failed: ${errorMessage(error)}`);
+    throw new Error(`Telegram ${method} failed: ${redactToken(secret, errorMessage(error))}`);
   }
   let result;
   try {

@@ -46,6 +46,13 @@ test("validates split secret/config settings", () => {
     bridgeSecret: "b".repeat(64),
     apiBaseUrl: "ftp://example.com",
   }), /apiBaseUrl/);
+  for (const apiBaseUrl of ["https://user:pw@proxy.example", "https://example.com?", "https://example.com#"]) {
+    assert.throws(() => helpers.validateSettings(`123456:${"a".repeat(32)}`, {
+      chatId: 42,
+      bridgeSecret: "b".repeat(64),
+      apiBaseUrl,
+    }), /apiBaseUrl/, apiBaseUrl);
+  }
   const enabled = helpers.validateSettings(`123456:${"a".repeat(32)}`, {
     chatId: 42,
     bridgeSecret: "b".repeat(64),

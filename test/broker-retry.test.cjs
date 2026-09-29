@@ -52,6 +52,19 @@ test("reports an abnormal wake exit in the session topic", async (t) => {
   assert.match(calls[0].body.text, /code 2[\s\S]*boom/);
 });
 
+test("redacts the bot token from Telegram network errors", async (t) => {
+  const { telegramCall } = require("../src/telegram/api.cjs");
+  const botToken = `123456:${"s".repeat(32)}`;
+  t.mock.method(global, "fetch", async (url) => {
+    throw new TypeError(`Request cannot be constructed from ${url}`);
+  });
+  await assert.rejects(telegramCall({ botToken }, "getMe", {}), (error) => {
+    assert.doesNotMatch(error.message, new RegExp("s{32}"));
+    assert.match(error.message, /<bot-token>/);
+    return true;
+  });
+});
+
 test("rejects unauthenticated frames and ignores unknown message types", () => {
   const destroyed = [];
   const client = { registered: true, socket: { destroyed: false, destroy: (error) => destroyed.push(error.message), write() {} } };

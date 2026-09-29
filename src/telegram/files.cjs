@@ -80,7 +80,7 @@ async function downloadTelegramAttachment(secret, message, topic) {
     await rename(temporary, destination);
   } catch (error) {
     await unlink(temporary).catch(() => {});
-    throw new Error(`Cannot download Telegram attachment: ${error.message}`);
+    throw new Error(`Cannot download Telegram attachment: ${String(error.message).split(secret.botToken).join("<bot-token>")}`);
   }
   return {
     path: destination,
