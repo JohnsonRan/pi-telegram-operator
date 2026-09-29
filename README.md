@@ -13,7 +13,7 @@ Pi session B  ⇄  Telegram topic "project-b · 5e6f7a8b"
 
 - **Follow along live.** Pi's replies stream into the topic, along with what it is doing right now (thinking, which tool it is running, subagent progress).
 - **Reply from anywhere.** Your message reaches that session: it starts a new turn if Pi is idle, or steers the current turn if Pi is busy. Sessions never see each other's messages.
-- **Control the session with buttons.** Each topic has a pinned status card with **Continue**, **Stop**, **Retry**, and **Refresh** buttons.
+- **Control the session with buttons.** Each topic has a pinned status card with **Continue**, **Stop**, **Retry**, and **Refresh status** buttons.
 - **Answer Pi's questions.** When Pi asks a multiple-choice question, you get tap-to-answer buttons.
 - **Exchange files.** Send Pi a photo or document; Pi can send reports, archives, and images back.
 - **Run Pi commands.** Your Pi extension commands, prompt templates, and skills appear in Telegram's `/` menu.
@@ -97,7 +97,9 @@ With wake mode, a message in a session's topic starts that exact session if no P
 
    Keep the other keys setup wrote. On Windows, escape backslashes: `"D:\\code"`.
 
-2. Install the background service so wake works even when no Pi is open:
+2. Restart any open Pi sessions so they load the new settings.
+
+3. Install the background service so wake works even when no Pi is open:
 
    ```bash
    node "$HOME/.pi/agent/git/github.com/JohnsonRan/pi-telegram-operator/service.cjs" install
@@ -143,7 +145,7 @@ The service is a per-user Scheduled Task (`PiTelegramOperator`) on Windows, a La
 
 ## Configuration
 
-Setup writes these files to `~/.pi/agent` (or `PI_CODING_AGENT_DIR`):
+TelegraPi keeps these files in `~/.pi/agent` (or `PI_CODING_AGENT_DIR`):
 
 | File | Contents |
 | --- | --- |
@@ -168,13 +170,13 @@ Settings in `pi-telegram-operator.json`:
 | `wakePiCommand` | `"pi"` | Command used to start Pi |
 | `wakePiCommandArgs` | `[]` | Extra arguments for that command |
 
-Rerunning setup keeps your settings as long as you authorize the same Telegram account.
+After editing settings, restart open Pi sessions and the service (`stop`, then `start`); they keep the old values until then. Rerunning setup keeps your settings as long as you authorize the same Telegram account.
 
 ## Network
 
 ### Can't reach api.telegram.org?
 
-Set `apiBaseUrl` to a reverse proxy, mirror, or self-hosted [Bot API server](https://github.com/tdlib/telegram-bot-api), for example `http://127.0.0.1:8081`. Your bot token is sent to this address, so use only endpoints you trust. The Bot API server's `--local` mode is not supported. To run setup through the same endpoint, set `TELEGRAM_API_BASE_URL` for that run; setup saves it as `apiBaseUrl`.
+Set `apiBaseUrl` to a reverse proxy, mirror, or self-hosted [Bot API server](https://github.com/tdlib/telegram-bot-api), for example `http://127.0.0.1:8081`. Your bot token is sent to this address, so use only endpoints you trust. The address must not contain a username or password. Before moving a bot to your own Bot API server, call [`logOut`](https://core.telegram.org/bots/api#logout) on the official server once, as Telegram requires; you then cannot switch back to the official server for 10 minutes. The Bot API server's `--local` mode is not supported. To run setup through the same endpoint, set `TELEGRAM_API_BASE_URL` for that run; setup saves it as `apiBaseUrl`.
 
 ### Using an HTTP proxy
 
@@ -189,7 +191,7 @@ export NO_PROXY=localhost,127.0.0.1
 Set these wherever Pi and setup are started. For the background service:
 
 - **macOS / Linux:** set them in your shell, then run `service.cjs install` again. They are saved into the service file, which only you can read (permissions 0600).
-- **Windows:** set them as user environment variables (`setx NODE_USE_ENV_PROXY 1`, and so on), then restart the service.
+- **Windows:** set them as user environment variables (`setx NODE_USE_ENV_PROXY 1`, and so on), then restart the service. If the service still doesn't use the proxy, sign out of Windows and back in.
 
 ## Troubleshooting
 
