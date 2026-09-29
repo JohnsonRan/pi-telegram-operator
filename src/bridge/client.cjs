@@ -236,6 +236,10 @@ function hydrateSeenDeliveries(state) {
     const deliveryId = entry.data?.deliveryId;
     if (typeof deliveryId === "string") state.seenDeliveries.add(deliveryId);
   }
+  trimSeenDeliveries(state);
+}
+
+function trimSeenDeliveries(state) {
   while (state.seenDeliveries.size > DELIVERY_DEDUPE_MAX) {
     state.seenDeliveries.delete(state.seenDeliveries.values().next().value);
   }
@@ -243,9 +247,7 @@ function hydrateSeenDeliveries(state) {
 
 function rememberDelivery(state, deliveryId) {
   state.seenDeliveries.add(deliveryId);
-  while (state.seenDeliveries.size > DELIVERY_DEDUPE_MAX) {
-    state.seenDeliveries.delete(state.seenDeliveries.values().next().value);
-  }
+  trimSeenDeliveries(state);
   state.pi.appendEntry?.("pi_notify_telegram_delivery", { deliveryId });
 }
 
@@ -263,7 +265,22 @@ function availablePiCommands(pi) {
   }
 }
 
-function clientStateFor(pi, ctx, notification) {
+// Copies the live session identity into state; returns true when it changed.
+function syncSession(state, ctx) {
+  state.ctx = ctx;
+  const next = {
+    sessionId: String(ctx?.sessionManager?.getSessionId?.() || ""),
+    cwd: String(ctx?.cwd || ""),
+    sessionName: String(state.pi.getSessionName?.() || ""),
+    commands: availablePiCommands(state.pi),
+  };
+  const changed = Object.keys(next).some((key) => JSON.stringify(state[key]) !== JSON.stringify(next[key]));
+  Object.assign(state, next);
+  if (changed) hydrateSeenDeliveries(state);
+  return changed;
+}
+
+function clientStateFor(pi, ctx) {
   let state = clientStates.get(pi);
   if (!state) {
     state = {
@@ -271,10 +288,10 @@ function clientStateFor(pi, ctx, notification) {
       ctx,
       secret: undefined,
       clientId: randomUUID(),
-      sessionId: String(notification.sessionId || ctx?.sessionManager?.getSessionId?.() || ""),
-      cwd: String(notification.cwd || ctx?.cwd || ""),
-      sessionName: String(pi.getSessionName?.() || ""),
-      commands: availablePiCommands(pi),
+      sessionId: undefined,
+      cwd: undefined,
+      sessionName: undefined,
+      commands: undefined,
       socket: undefined,
       connected: false,
       ready: undefined,
@@ -289,24 +306,8 @@ function clientStateFor(pi, ctx, notification) {
       closed: false,
     };
     clientStates.set(pi, state);
-    hydrateSeenDeliveries(state);
     const refreshSession = (_event, liveCtx) => {
-      if (!liveCtx?.sessionManager) return;
-      state.ctx = liveCtx;
-      const nextSessionId = String(liveCtx.sessionManager.getSessionId() || "");
-      const nextCwd = String(liveCtx.cwd || "");
-      const nextSessionName = String(pi.getSessionName?.() || "");
-      const nextCommands = availablePiCommands(pi);
-      const changed = state.sessionId !== nextSessionId || state.cwd !== nextCwd || state.sessionName !== nextSessionName ||
-        JSON.stringify(state.commands) !== JSON.stringify(nextCommands);
-      state.sessionId = nextSessionId;
-      state.cwd = nextCwd;
-      state.sessionName = nextSessionName;
-      state.commands = nextCommands;
-      if (changed) {
-        hydrateSeenDeliveries(state);
-        registerClient(state);
-      }
+      if (liveCtx?.sessionManager && syncSession(state, liveCtx)) registerClient(state);
     };
     pi.on("session_start", refreshSession);
     pi.on("session_info_changed", refreshSession);
@@ -320,21 +321,7 @@ function clientStateFor(pi, ctx, notification) {
       clientStates.delete(pi);
     });
   }
-  state.ctx = ctx;
-  const nextSessionId = String(notification.sessionId || "");
-  const nextCwd = String(notification.cwd || "");
-  const nextSessionName = String(pi.getSessionName?.() || "");
-  const nextCommands = availablePiCommands(pi);
-  const changed = state.sessionId !== nextSessionId || state.cwd !== nextCwd || state.sessionName !== nextSessionName ||
-    JSON.stringify(state.commands) !== JSON.stringify(nextCommands);
-  state.sessionId = nextSessionId;
-  state.cwd = nextCwd;
-  state.sessionName = nextSessionName;
-  state.commands = nextCommands;
-  if (changed) {
-    hydrateSeenDeliveries(state);
-    if (state.connected) registerClient(state);
-  }
+  if (syncSession(state, ctx) && state.connected) registerClient(state);
   return state;
 }
 
@@ -384,11 +371,7 @@ function requestQuestion(state, question, options) {
 }
 
 async function initializeState(pi, ctx) {
-  const notification = {
-    sessionId: ctx?.sessionManager?.getSessionId?.() || "",
-    cwd: ctx?.cwd || "",
-  };
-  const state = clientStateFor(pi, ctx, notification);
+  const state = clientStateFor(pi, ctx);
   if (!state.ready) {
     state.ready = (async () => {
       if (!state.secret) state.secret = await readSecret();
@@ -406,4 +389,4 @@ function getClientState(pi) {
   return clientStates.get(pi);
 }
 
-module.exports = Object.freeze({ clientStateFor, connectClient, getClientState, initializeState, requestArtifact, requestBroker, requestNotification, requestQuestion });
+module.exports = Object.freeze({ connectClient, getClientState, initializeState, requestArtifact, requestBroker, requestNotification, requestQuestion });
