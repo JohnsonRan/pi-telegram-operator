@@ -5,7 +5,7 @@ import { Type } from "typebox";
 
 const require = createRequire(import.meta.url);
 const { decodeWakePayload, WAKE_SENTINEL } = require("./src/wake/payload.cjs") as {
-  decodeWakePayload(encoded: string | undefined): { text: string; expandPromptTemplates: boolean };
+  decodeWakePayload(encoded: string | undefined): { text: string };
   WAKE_SENTINEL: string;
 };
 const runtime = require("./src/runtime.cjs") as {

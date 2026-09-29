@@ -36,11 +36,8 @@ test("resolves wake cwd only inside configured roots", async () => {
 });
 
 test("decodes wake payloads and only exposes slash commands as CLI arguments", () => {
-  const encoded = Buffer.from(JSON.stringify({
-    text: "inspect this",
-    expandPromptTemplates: true,
-  }), "utf8").toString("base64url");
-  assert.deepEqual(decodeWakePayload(encoded), { text: "inspect this", expandPromptTemplates: true });
+  const encoded = Buffer.from(JSON.stringify({ text: "inspect this" }), "utf8").toString("base64url");
+  assert.deepEqual(decodeWakePayload(encoded), { text: "inspect this" });
   assert.equal(wakePromptArgument("inspect this"), WAKE_SENTINEL);
   assert.equal(wakePromptArgument("--help"), WAKE_SENTINEL);
   assert.equal(wakePromptArgument("@secret"), WAKE_SENTINEL);
@@ -74,7 +71,7 @@ test("launches one full-permission Pi process per session", async () => {
   assert.deepEqual(calls[0].args, ["--session-id", "session-1", "--name", "Test", "--print", "--approve", WAKE_SENTINEL]);
   assert.deepEqual(
     JSON.parse(Buffer.from(calls[0].options.env.PI_TELEGRAM_WAKE_PAYLOAD, "base64url").toString("utf8")),
-    { text: "hello", expandPromptTemplates: true },
+    { text: "hello" },
   );
   assert.equal(calls[0].options.env.PATH, "test-path");
   assert.equal(calls[0].options.env.PI_EXTENSION_UTILS_PROCESS_DOMAIN, undefined);

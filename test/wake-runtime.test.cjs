@@ -93,10 +93,10 @@ function response(result) { return { ok: true, status: 200, json: async () => ({
   assert.equal(result.launches.length, 2);
   const firstSessionId = result.launches[0].args[1];
   assert.deepEqual(result.launches[0].args.slice(-3), ["--print", "--approve", WAKE_SENTINEL]);
-  assert.deepEqual(result.launches[0].payload, { text: "first prompt", expandPromptTemplates: true });
+  assert.deepEqual(result.launches[0].payload, { text: "first prompt" });
   assert.equal(result.launches[1].args[1], firstSessionId);
   assert.deepEqual(result.launches[1].args.slice(-3), ["--print", "--approve", WAKE_SENTINEL]);
-  assert.deepEqual(result.launches[1].payload, { text: "second prompt", expandPromptTemplates: true });
+  assert.deepEqual(result.launches[1].payload, { text: "second prompt" });
   assert.ok(result.sent.some((message) => message.message_thread_id === 801 && /New Pi session/.test(message.text)));
   assert.ok(result.sent.filter((message) => /Waking Pi session/.test(message.text)).length >= 2);
 });

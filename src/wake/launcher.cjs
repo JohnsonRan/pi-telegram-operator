@@ -146,10 +146,7 @@ class WakeLauncher {
     ];
     const interactiveArgs = [...commonArgs, "--approve", wakePromptArgument(prompt)];
     const backgroundArgs = [...commonArgs, "--print", "--approve", wakePromptArgument(prompt)];
-    const wakePayload = Buffer.from(JSON.stringify({
-      text: String(prompt || ""),
-      expandPromptTemplates: true,
-    }), "utf8").toString("base64url");
+    const wakePayload = Buffer.from(JSON.stringify({ text: String(prompt || "") }), "utf8").toString("base64url");
     // Telegram wake processes are independent sessions, not subprocess workers
     // of whichever Pi instance currently owns the broker.
     const wakeEnv = {
