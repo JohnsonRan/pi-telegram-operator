@@ -1,6 +1,6 @@
 const { randomUUID } = require("node:crypto");
 const { createWriteStream } = require("node:fs");
-const { lstat, mkdir, open, realpath, rename, unlink } = require("node:fs/promises");
+const { lstat, mkdir, open, realpath, rename, unlink, writeFile } = require("node:fs/promises");
 const path = require("node:path");
 const { Readable, Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
@@ -56,6 +56,10 @@ async function downloadTelegramAttachment(secret, message, topic) {
   }
   const canonicalInbox = await realpath(inbox);
   if (!isPathInside(cwd, canonicalInbox)) throw new Error("Telegram attachment inbox resolves outside the session working directory");
+  // Keep received files out of the user's commits.
+  await writeFile(path.join(storage, ".gitignore"), "*\n", { flag: "wx", mode: 0o600 }).catch((error) => {
+    if (error?.code !== "EEXIST") throw error;
+  });
   const fileInfo = await telegramCall(secret, "getFile", { file_id: attachment.fileId });
   if (!fileInfo?.file_path) throw new Error("Telegram did not return an attachment file path");
   const fileName = `${new Date().toISOString().replace(/[:.]/g, "-")}-${safeFileName(attachment.fileName)}`;

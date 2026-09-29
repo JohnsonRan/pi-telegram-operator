@@ -45,6 +45,7 @@ test("downloads an authorized Telegram attachment into the session inbox", async
     assert.equal(calls, 2);
     assert.match(result.relativePath, /^\.pi-telegram[\\/]inbox[\\/].*-build\.log$/);
     assert.equal(await readFile(result.path, "utf8"), "build failed\n");
+    assert.equal(await readFile(path.join(root, ".pi-telegram", ".gitignore"), "utf8"), "*\n");
   } finally {
     global.fetch = originalFetch;
     await rm(root, { recursive: true, force: true });

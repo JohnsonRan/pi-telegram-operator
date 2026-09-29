@@ -63,7 +63,7 @@ Start Pi as usual. The first time a session sends something (a finished answer, 
 
 ### Files
 
-- **To Pi:** send a photo or document inside a session topic. It is saved to `<project>/.pi-telegram/inbox/` and Pi is asked to look at it. Limit: 20 MiB.
+- **To Pi:** send a photo or document inside a session topic. It is saved to `<project>/.pi-telegram/inbox/` (Git-ignored) and Pi is asked to look at it. Limit: 20 MiB.
 - **From Pi:** Pi can use the `telegram_send_file` tool to send a file from its working directory. Limit: 50 MiB. Files outside the project directory are refused.
 
 ### Questions
