@@ -1,3 +1,4 @@
+const { enqueueKeyed } = require("../shared/queue.cjs");
 const { formatLocalTimestamp } = require("../shared/time.cjs");
 const { errorMessage, telegramCall } = require("./api.cjs");
 
@@ -42,8 +43,7 @@ async function syncTopicDashboard(state, topic, update = {}) {
     detail: String(update.detail || ""),
     updatedAt: Date.now(),
   };
-  const previous = state.dashboardQueues.get(topic.sessionId) || Promise.resolve();
-  const next = previous.catch(() => {}).then(async () => {
+  return enqueueKeyed(state.dashboardQueues, topic.sessionId, async () => {
     const payload = {
       chat_id: state.secret.chatId,
       text: dashboardText(topic),
@@ -75,12 +75,6 @@ async function syncTopicDashboard(state, topic, update = {}) {
     }).catch((error) => console.warn(`[pi-telegram-operator] Cannot pin session dashboard: ${errorMessage(error)}`));
     return sent.message_id;
   });
-  state.dashboardQueues.set(topic.sessionId, next);
-  const cleanup = () => {
-    if (state.dashboardQueues.get(topic.sessionId) === next) state.dashboardQueues.delete(topic.sessionId);
-  };
-  next.then(cleanup, cleanup);
-  return next;
 }
 
 async function sendTopicChatAction(state, topic, action = "typing") {

@@ -1,6 +1,7 @@
 const { randomUUID } = require("node:crypto");
 const path = require("node:path");
 const { sendLine } = require("../bridge/protocol.cjs");
+const { enqueueKeyed } = require("../shared/queue.cjs");
 const { MAX_PENDING_REPLIES, MAX_TOPICS, pruneExpiredBrokerState, queuePersist } = require("../broker/state.cjs");
 const { CONTROL_COMMANDS, CONTROL_PANEL_COMMANDS, RESTORE_CONTEXT_PROMPT, controlPanel, parseControlCallback, parseRestoreCallback, topicName, translateTelegramCommand } = require("./control.cjs");
 const { splitMarkdown } = require("./format.cjs");
@@ -79,16 +80,7 @@ function findReplyTarget(state, message) {
 }
 
 function enqueueStream(state, sessionId, task) {
-  const previous = state.streamQueues.get(sessionId) || Promise.resolve();
-  const next = previous.catch(() => {}).then(task);
-  state.streamQueues.set(sessionId, next);
-  const cleanup = () => {
-    if (state.streamQueues.get(sessionId) === next) state.streamQueues.delete(sessionId);
-  };
-  // Supplying both handlers prevents the ignored cleanup promise from
-  // mirroring a task rejection as an unhandled rejection.
-  next.then(cleanup, cleanup);
-  return next;
+  return enqueueKeyed(state.streamQueues, sessionId, task);
 }
 
 function connectedTarget(state, sessionId) {
