@@ -12,6 +12,7 @@ const {
   STATE_PATH,
 } = require("./src/shared/paths.cjs");
 const { preserveOperationalConfig } = require("./src/shared/settings.cjs");
+const { telegramCall } = require("./src/telegram/api.cjs");
 
 async function portIsListening(port) {
   return new Promise((resolve) => {
@@ -32,16 +33,8 @@ async function brokerIsRunning(read = readFile) {
   return Number.isInteger(port) && port >= 1024 && port <= 65535 && portIsListening(port);
 }
 
-async function call(token, method, payload, timeoutMs = 35_000) {
-  const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-  const result = await response.json();
-  if (!response.ok || result?.ok !== true) throw new Error(result?.description || `HTTP ${response.status}`);
-  return result.result;
+function call(token, method, payload, timeoutMs = 35_000) {
+  return telegramCall({ botToken: token }, method, payload, timeoutMs);
 }
 
 function hiddenQuestion(prompt) {

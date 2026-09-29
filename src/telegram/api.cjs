@@ -1,45 +1,13 @@
 const { errorMessage } = require("../shared/errors.cjs");
 
-async function telegramCall(secret, method, payload, timeoutMs = 20_000, externalSignal) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    let response;
-    try {
-      const timeoutSignal = AbortSignal.timeout(timeoutMs);
-      response = await fetch(`https://api.telegram.org/bot${secret.botToken}/${method}`, {
-        method: "POST",
-        headers: { "content-type": "application/json; charset=utf-8" },
-        body: JSON.stringify(payload),
-        signal: externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal,
-      });
-    } catch (error) {
-      throw new Error(`Telegram ${method} failed: ${errorMessage(error)}`);
-    }
-
-    let result;
-    try {
-      result = await response.json();
-    } catch {
-      throw new Error(`Telegram ${method} returned invalid JSON (HTTP ${response.status})`);
-    }
-    if (response.ok && result?.ok === true) return result.result;
-
-    const retryAfter = Number(result?.parameters?.retry_after);
-    if (response.status === 429 && attempt === 0 && Number.isFinite(retryAfter) && retryAfter >= 0 && retryAfter <= 60) {
-      await new Promise((resolve) => setTimeout(resolve, retryAfter * 1_000 + 250));
-      continue;
-    }
-    throw new Error(`Telegram ${method} failed: ${result?.description || `HTTP ${response.status}`}`);
-  }
-  throw new Error(`Telegram ${method} failed after retry`);
-}
-
-async function telegramMultipartCall(secret, method, form, timeoutMs = 60_000) {
+async function postTelegram(secret, method, init, timeoutMs, externalSignal) {
   let response;
   try {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
     response = await fetch(`https://api.telegram.org/bot${secret.botToken}/${method}`, {
       method: "POST",
-      body: form,
-      signal: AbortSignal.timeout(timeoutMs),
+      ...init,
+      signal: externalSignal ? AbortSignal.any([timeoutSignal, externalSignal]) : timeoutSignal,
     });
   } catch (error) {
     throw new Error(`Telegram ${method} failed: ${errorMessage(error)}`);
@@ -51,7 +19,26 @@ async function telegramMultipartCall(secret, method, form, timeoutMs = 60_000) {
     throw new Error(`Telegram ${method} returned invalid JSON (HTTP ${response.status})`);
   }
   if (response.ok && result?.ok === true) return result.result;
-  throw new Error(`Telegram ${method} failed: ${result?.description || `HTTP ${response.status}`}`);
+  throw Object.assign(new Error(`Telegram ${method} failed: ${result?.description || `HTTP ${response.status}`}`), {
+    status: response.status,
+    retryAfter: Number(result?.parameters?.retry_after),
+  });
+}
+
+async function telegramCall(secret, method, payload, timeoutMs = 20_000, externalSignal) {
+  const init = { headers: { "content-type": "application/json; charset=utf-8" }, body: JSON.stringify(payload) };
+  try {
+    return await postTelegram(secret, method, init, timeoutMs, externalSignal);
+  } catch (error) {
+    const retryAfter = error.retryAfter;
+    if (error.status !== 429 || !Number.isFinite(retryAfter) || retryAfter < 0 || retryAfter > 60) throw error;
+    await new Promise((resolve) => setTimeout(resolve, retryAfter * 1_000 + 250));
+    return postTelegram(secret, method, init, timeoutMs, externalSignal);
+  }
+}
+
+function telegramMultipartCall(secret, method, form, timeoutMs = 60_000) {
+  return postTelegram(secret, method, { body: form }, timeoutMs);
 }
 
 async function telegramFormattedCall(secret, method, payload, plainText) {
