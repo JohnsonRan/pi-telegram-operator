@@ -33,13 +33,6 @@ async function brokerIsRunning(read = readFile) {
   return Number.isInteger(port) && port >= 1024 && port <= 65535 && portIsListening(port);
 }
 
-// Setup has no config yet, so a custom Bot API endpoint comes from the environment.
-const apiBaseUrl = normalizeApiBaseUrl(process.env.TELEGRAM_API_BASE_URL);
-
-function call(token, method, payload, timeoutMs = 35_000) {
-  return telegramCall({ botToken: token, apiBaseUrl }, method, payload, timeoutMs);
-}
-
 function hiddenQuestion(prompt) {
   if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
     throw new Error("Run setup in an interactive terminal or set TELEGRAM_BOT_TOKEN temporarily");
@@ -137,20 +130,23 @@ async function main() {
   stdout.write("Create a dedicated bot with @BotFather and enable Threaded Mode before continuing.\n");
   const token = String(process.env.TELEGRAM_BOT_TOKEN || await hiddenQuestion("Bot token (hidden): ")).trim();
   if (!BOT_TOKEN_PATTERN.test(token)) throw new Error("Invalid Telegram bot token");
+  // Setup has no config yet, so a custom Bot API endpoint comes from the environment.
+  const apiBaseUrl = normalizeApiBaseUrl(process.env.TELEGRAM_API_BASE_URL);
+  const call = (method, payload, timeoutMs = 35_000) => telegramCall({ botToken: token, apiBaseUrl }, method, payload, timeoutMs);
 
   const terminal = readline.createInterface({ input: stdin, output: stdout });
   try {
-    const bot = await call(token, "getMe", {});
+    const bot = await call("getMe", {});
     stdout.write(`Connected to @${bot.username || bot.first_name}.\n`);
 
-    const webhook = await call(token, "getWebhookInfo", {});
+    const webhook = await call("getWebhookInfo", {});
     if (webhook.url) {
       const answer = (await terminal.question(`This bot has a webhook (${webhook.url}). Remove it? [y/N] `)).trim().toLowerCase();
       if (answer !== "y" && answer !== "yes") throw new Error("A webhook prevents Telegram long polling");
-      await call(token, "deleteWebhook", { drop_pending_updates: false });
+      await call("deleteWebhook", { drop_pending_updates: false });
     }
 
-    const existing = await call(token, "getUpdates", { offset: -1, timeout: 0, allowed_updates: ["message"] });
+    const existing = await call("getUpdates", { offset: -1, timeout: 0, allowed_updates: ["message"] });
     let offset = existing.length > 0 ? existing[existing.length - 1].update_id + 1 : 0;
     const nonce = randomBytes(6).toString("hex");
     const expectedStart = `/start ${nonce}`;
@@ -161,7 +157,7 @@ async function main() {
     const deadline = Date.now() + 90_000;
     let selected;
     while (!selected && Date.now() < deadline) {
-      const updates = await call(token, "getUpdates", { offset, timeout: 10, allowed_updates: ["message"] }, 20_000);
+      const updates = await call("getUpdates", { offset, timeout: 10, allowed_updates: ["message"] }, 20_000);
       for (const update of updates) {
         offset = Math.max(offset, update.update_id + 1);
         const message = update.message;
@@ -172,17 +168,17 @@ async function main() {
     }
     if (!selected) throw new Error("The expected private setup message was not received within 90 seconds");
 
-    const validationTopic = await call(token, "createForumTopic", {
+    const validationTopic = await call("createForumTopic", {
       chat_id: selected.chat.id,
       name: "Pi threaded-mode validation",
     });
-    await call(token, "sendMessageDraft", {
+    await call("sendMessageDraft", {
       chat_id: selected.chat.id,
       message_thread_id: validationTopic.message_thread_id,
       draft_id: 1,
       text: "Streaming validation",
     });
-    await call(token, "deleteForumTopic", {
+    await call("deleteForumTopic", {
       chat_id: selected.chat.id,
       message_thread_id: validationTopic.message_thread_id,
     });
@@ -214,7 +210,7 @@ async function main() {
       { file: CONFIG_PATH, content: configContent, options: { mode: 0o600 } },
       { file: STATE_PATH, content: stateContent, options: { mode: 0o600 } },
     ]);
-    await call(token, "sendMessage", {
+    await call("sendMessage", {
       chat_id: selected.chat.id,
       text: "TelegraPi is configured successfully.",
     });
