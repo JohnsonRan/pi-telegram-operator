@@ -39,6 +39,14 @@ test("a disconnect keeps questions waiting for the replayed answer", async () =>
   assert.equal(state.written.at(-1).type, "questionAck");
 });
 
+test("a superseded client does not reconnect on its own", () => {
+  const state = { closed: false, superseded: false, reconnectTimer: undefined };
+  client.handleClientMessage(state, { type: "superseded", sessionId: "session" });
+  client.scheduleReconnect(state);
+  assert.equal(state.superseded, true);
+  assert.equal(state.reconnectTimer, undefined);
+});
+
 test("aborting the tool cancels a waiting question", async () => {
   const state = connectedState();
   const controller = new AbortController();

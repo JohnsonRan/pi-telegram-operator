@@ -75,6 +75,24 @@ test("keeps held follow-ups back from a wake child until its first turn", async 
   await state.persistQueue;
 });
 
+test("tells the replaced client it was superseded instead of dropping it", () => {
+  const state = registerState([]);
+  const events = [];
+  const socket = (name) => ({
+    destroyed: false,
+    write: (line) => events.push([name, JSON.parse(line).type]),
+    end: () => events.push([name, "end"]),
+    destroy: () => events.push([name, "destroy"]),
+  });
+  for (const [clientId, name] of [["old", "old"], ["new", "new"]]) {
+    broker.handleBrokerRequest(state, { registered: false, socket: socket(name) }, {
+      auth: "secret", type: "register", version: 2, clientId, sessionId: "session", cwd: "",
+    });
+  }
+  assert.deepEqual(events.filter(([name]) => name === "old"), [["old", "registered"], ["old", "superseded"], ["old", "end"]]);
+  assert.equal(state.clientsBySession.get("session").clientId, "new");
+});
+
 test("reports an abnormal wake exit in the session topic", async (t) => {
   const calls = [];
   t.mock.method(global, "fetch", async (url, init) => {

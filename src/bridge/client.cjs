@@ -79,7 +79,8 @@ function rejectPending(state, error, includeDurable = true) {
 }
 
 function scheduleReconnect(state) {
-  if (state.closed || state.reconnectTimer) return;
+  // A superseded client waits for its own activity or a session change.
+  if (state.closed || state.superseded || state.reconnectTimer) return;
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = undefined;
     connectClient(state).catch(() => scheduleReconnect(state));
@@ -89,6 +90,7 @@ function scheduleReconnect(state) {
 
 async function connectClient(state) {
   if (state.closed) throw new Error("Telegram bridge client is closed");
+  state.superseded = false;
   if (state.connected && state.socket && !state.socket.destroyed) return;
   if (state.connectPromise) return state.connectPromise;
 
@@ -188,6 +190,10 @@ function handleClientMessage(state, message) {
         questionId: message.questionId,
       });
     }
+    return;
+  }
+  if (message?.type === "superseded") {
+    state.superseded = true;
     return;
   }
   if (message?.type === "control" && message.sessionId === state.sessionId && message.action === "stop") {
@@ -302,6 +308,7 @@ function clientStateFor(pi, ctx) {
       connectPromise: undefined,
       handshake: undefined,
       reconnectTimer: undefined,
+      superseded: false,
       pending: new Map(),
       seenDeliveries: new Set(),
       currentStream: undefined,
@@ -311,7 +318,9 @@ function clientStateFor(pi, ctx) {
     };
     clientStates.set(pi, state);
     const refreshSession = (_event, liveCtx) => {
-      if (liveCtx?.sessionManager && syncSession(state, liveCtx)) registerClient(state);
+      if (!liveCtx?.sessionManager || !syncSession(state, liveCtx)) return;
+      registerClient(state);
+      if (state.superseded && state.secret) connectClient(state).catch(() => scheduleReconnect(state));
     };
     pi.on("session_start", refreshSession);
     pi.on("session_info_changed", refreshSession);
@@ -410,5 +419,5 @@ module.exports = Object.freeze({
   requestBroker,
   requestNotification,
   requestQuestion,
-  __test: Object.freeze({ handleClientMessage, rejectPending }),
+  __test: Object.freeze({ handleClientMessage, rejectPending, scheduleReconnect }),
 });

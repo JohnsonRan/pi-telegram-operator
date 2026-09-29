@@ -203,7 +203,11 @@ function handleRegister(state, client, message) {
     if (registeredClient === client && registeredSessionId !== client.sessionId) state.clientsBySession.delete(registeredSessionId);
   }
   const previous = state.clientsBySession.get(client.sessionId);
-  if (previous && previous !== client) previous.socket.destroy();
+  if (previous && previous !== client) {
+    // Otherwise two processes on one session would evict each other every reconnect.
+    sendLine(previous.socket, { type: "superseded", sessionId: client.sessionId });
+    previous.socket.end();
+  }
   state.clients.set(client.clientId, client);
   state.clientsBySession.set(client.sessionId, client);
   sendLine(client.socket, { type: "registered", version: PROTOCOL_VERSION });
