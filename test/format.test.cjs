@@ -61,6 +61,13 @@ test("keeps both halves of a split code block rendered as code", () => {
   assert.ok(chunks.every((chunk) => renderedTextLength(chunk.html) <= 3500));
 });
 
+test("does not leave an empty code block when splitting after an opening fence", () => {
+  const chunks = renderTelegramChunkPairs(`${"p".repeat(3000)}\n\`\`\`js\n${"c".repeat(3500)}\n\`\`\``);
+  assert.ok(chunks.length >= 2);
+  assert.ok(chunks.every((chunk) => !chunk.html.includes("<code class=\"language-js\"></code>")));
+  assert.ok(chunks.some((chunk) => chunk.html.includes("<pre><code class=\"language-js\">c")));
+});
+
 test("rejects unsafe links and chunks by rendered Telegram length", () => {
   assert.equal(safeUrl("javascript:alert(1)"), undefined);
   assert.equal(safeUrl("tg://resolve?domain=unsafe"), undefined);

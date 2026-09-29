@@ -173,7 +173,12 @@ function splitMarkdown(value, renderedLimit = MAX_SOURCE_CHARS) {
   // Reopen a code block cut in half so the tail still renders as code;
   // renderTelegramHtml closes the unterminated head on its own.
   const fence = unclosedFence(left);
-  if (fence) right = `${fence}\n${right}`;
+  if (fence) {
+    // A split right after the opening fence would leave an empty code block.
+    const lastBreak = left.lastIndexOf("\n");
+    if (lastBreak > 0 && left.slice(lastBreak + 1).trim() === fence) left = left.slice(0, lastBreak);
+    right = `${fence}\n${right}`;
+  }
   return [
     ...splitMarkdown(left, renderedLimit),
     ...splitMarkdown(right, renderedLimit),

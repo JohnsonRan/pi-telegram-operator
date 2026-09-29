@@ -90,11 +90,12 @@ function handleStreamRequest(state, client, message) {
       if (message.type === "streamDraft") {
         const sourceChunks = splitMarkdown(text);
         const tail = sourceChunks[sourceChunks.length - 1] || "";
-        const preview = sourceChunks.length > 1 ? `…${tail}` : tail;
+        // Keep the ellipsis on its own line so a leading code fence still parses.
+        const preview = sourceChunks.length > 1 ? `…\n${tail}` : tail;
         const html = renderTelegramHtml(preview);
         sendTopicChatAction(state, topic).catch(() => {});
         if (topic.dashboardStatus?.phase !== "Working") {
-          updateDashboard(state, topic, { phase: "Working", detail: preview.split("\n")[0] });
+          updateDashboard(state, topic, { phase: "Working", detail: tail.split("\n")[0] });
         }
         await telegramFormattedCall(state.secret, "sendMessageDraft", {
           chat_id: state.secret.chatId,
