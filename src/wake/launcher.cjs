@@ -4,6 +4,7 @@ const { closeSync, openSync, readFileSync, writeFileSync } = require("node:fs");
 const { mkdir, readdir, realpath, stat, unlink, writeFile } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { isPathInside } = require("../shared/paths.cjs");
 const { createTerminalLaunch } = require("./terminal.cjs");
 const { wakePromptArgument } = require("./payload.cjs");
 
@@ -60,11 +61,6 @@ function parseControlCommand(value) {
     cwd: argument.slice(0, separator).trim(),
     prompt: argument.slice(separator + 1).trim(),
   };
-}
-
-function isPathInside(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 async function resolveWakeCwd(value, defaultCwd, allowedRoots) {

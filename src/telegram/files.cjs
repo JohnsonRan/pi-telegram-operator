@@ -4,6 +4,7 @@ const { lstat, mkdir, open, realpath, rename, unlink } = require("node:fs/promis
 const path = require("node:path");
 const { Readable, Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
+const { isPathInside } = require("../shared/paths.cjs");
 const { telegramCall, telegramMultipartCall } = require("./api.cjs");
 
 const MAX_INBOUND_FILE_BYTES = 20 * 1024 * 1024;
@@ -17,11 +18,6 @@ function safeFileName(value, fallback = "attachment") {
     .replace(/[. ]+$/g, "")
     .slice(0, 120);
   return base && base !== "." && base !== ".." ? base : fallback;
-}
-
-function isPathInside(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function attachmentFromMessage(message) {

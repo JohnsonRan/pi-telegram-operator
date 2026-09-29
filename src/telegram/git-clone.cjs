@@ -1,6 +1,7 @@
 const { execFile } = require("node:child_process");
 const { lstat, realpath } = require("node:fs/promises");
 const path = require("node:path");
+const { isPathInside } = require("../shared/paths.cjs");
 const { resolveWakeCwd } = require("../wake/launcher.cjs");
 
 const CLONE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -84,8 +85,7 @@ async function cloneRepository(options) {
   }
   const clonedCwd = await realpath(destination).catch(() => undefined);
   if (!clonedCwd) throw new Error(`Git clone did not create the repository directory: ${destination}`);
-  const relative = path.relative(baseCwd, clonedCwd);
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+  if (!isPathInside(baseCwd, clonedCwd)) {
     throw new Error("Cloned repository resolved outside wakeDefaultCwd");
   }
   return { remote, directory, cwd: clonedCwd };

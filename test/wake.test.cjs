@@ -25,6 +25,8 @@ test("resolves wake cwd only inside configured roots", async () => {
   await mkdir(child);
   try {
     assert.equal(await resolveWakeCwd("project", root, [root]), await realpath(child));
+    await mkdir(path.join(root, "..dots"));
+    assert.equal(await resolveWakeCwd("..dots", root, [root]), await realpath(path.join(root, "..dots")));
     await assert.rejects(resolveWakeCwd(path.dirname(root), root, [root]), /outside wakeAllowedRoots/);
     await assert.rejects(resolveWakeCwd("missing", root, [root]), /does not exist/);
   } finally {

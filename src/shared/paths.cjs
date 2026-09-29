@@ -7,10 +7,16 @@ const STATE_PATH = path.join(AGENT_DIR, "pi-telegram-operator.state.json");
 const DEFAULT_PORT = 43871;
 const WINDOWS_DAEMON_MARKER = "--pi-telegram-operator-service-daemon";
 
+function isPathInside(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
 module.exports = Object.freeze({
   AGENT_DIR,
   CONFIG_PATH,
   DEFAULT_PORT,
+  isPathInside,
   SECRET_PATH,
   STATE_PATH,
   WINDOWS_DAEMON_MARKER,
