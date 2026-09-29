@@ -11,13 +11,7 @@ const { decodeWakePayload, WAKE_SENTINEL } = require("./src/wake/payload.cjs") a
 const runtime = require("./src/runtime.cjs") as {
   askQuestion(pi: ExtensionAPI, ctx: ExtensionContext, question: string, options: string[]): Promise<string>;
   attach(pi: ExtensionAPI): void;
-  notify(
-    pi: ExtensionAPI,
-    ctx: ExtensionContext,
-    notification: { sessionId: string; cwd: string },
-    title: string,
-    body: string,
-  ): Promise<void>;
+  notify(pi: ExtensionAPI, ctx: ExtensionContext, title: string, body: string): Promise<void>;
   sendFile(pi: ExtensionAPI, ctx: ExtensionContext, filePath: string, caption?: string): Promise<void>;
 };
 
@@ -40,13 +34,6 @@ function cleanBody(value: unknown): string {
   return String(value ?? "")
     .replace(/\r\n?/g, "\n")
     .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/g, "");
-}
-
-function sessionInfo(ctx: ExtensionContext): { sessionId: string; cwd: string } {
-  return {
-    sessionId: ctx.sessionManager.getSessionId(),
-    cwd: ctx.cwd,
-  };
 }
 
 function questionBody(event: ToolExecutionStartEvent, ctx: ExtensionContext): string {
@@ -129,7 +116,7 @@ export default function telegraPi(pi: ExtensionAPI): void {
 
   const send = async (ctx: ExtensionContext, title: string, body: string): Promise<void> => {
     try {
-      await runtime.notify(pi, ctx, sessionInfo(ctx), cleanHeader(title), cleanBody(body));
+      await runtime.notify(pi, ctx, cleanHeader(title), cleanBody(body));
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       process.stderr.write(`[pi-telegram-operator] Notification failed: ${detail}\n`);

@@ -749,8 +749,8 @@ async function emit(pi, event, payload, ctx) {
   await emit(pi1, "agent_settled", {}, ctx1);
 
   await Promise.all([
-    runtime.notify(pi1, ctx1, { sessionId: "session-one", cwd: ctx1.cwd }, "Question <one>", "Reply **one**"),
-    runtime.notify(pi2, ctx2, { sessionId: "session-two", cwd: ctx2.cwd }, "Question two", "Reply two"),
+    runtime.notify(pi1, ctx1, "Question <one>", "Reply **one**"),
+    runtime.notify(pi2, ctx2, "Question two", "Reply two"),
   ]);
   await new Promise((resolve) => setTimeout(resolve, 600));
 

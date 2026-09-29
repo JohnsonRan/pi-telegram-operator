@@ -7,41 +7,23 @@
  * while each connected Pi process injects replies with pi.sendUserMessage().
  */
 
-const { clientStateFor, initializeState, requestArtifact, requestNotification, requestQuestion } = require("./bridge/client.cjs");
+const { initializeState, requestArtifact, requestNotification, requestQuestion } = require("./bridge/client.cjs");
 const { closeLeader, startLocalLeader } = require("./broker/server.cjs");
 const { readSettings: readSecret } = require("./shared/settings.cjs");
 const { attach } = require("./session/streaming.cjs");
 const { errorMessage } = require("./telegram/api.cjs");
 
-async function notify(pi, ctx, notification, title, body) {
-  if (!pi || typeof pi.on !== "function" || typeof pi.sendUserMessage !== "function") {
-    throw new Error("TelegraPi requires the Pi ExtensionAPI");
-  }
-  const state = clientStateFor(pi, ctx, notification);
-  if (state.ready) await state.ready;
-  else await initializeState(pi, ctx);
-  await requestNotification(state, title, body);
+async function notify(pi, ctx, title, body) {
+  await requestNotification(await initializeState(pi, ctx), title, body);
 }
 
 async function askQuestion(pi, ctx, question, options) {
-  const state = clientStateFor(pi, ctx, {
-    sessionId: ctx?.sessionManager?.getSessionId?.() || "",
-    cwd: ctx?.cwd || "",
-  });
-  if (state.ready) await state.ready;
-  else await initializeState(pi, ctx);
-  const result = await requestQuestion(state, question, options);
+  const result = await requestQuestion(await initializeState(pi, ctx), question, options);
   return String(result.answer || "");
 }
 
 async function sendFile(pi, ctx, filePath, caption = "") {
-  const state = clientStateFor(pi, ctx, {
-    sessionId: ctx?.sessionManager?.getSessionId?.() || "",
-    cwd: ctx?.cwd || "",
-  });
-  if (state.ready) await state.ready;
-  else await initializeState(pi, ctx);
-  await requestArtifact(state, filePath, caption);
+  await requestArtifact(await initializeState(pi, ctx), filePath, caption);
 }
 
 async function runWakeDaemon() {
