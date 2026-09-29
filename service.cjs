@@ -116,6 +116,12 @@ function installMac() {
   run("launchctl", ["bootstrap", `gui/${process.getuid()}`, file]);
 }
 
+function startMac() {
+  // stop uses bootout, which unloads the agent; reload it before kickstart.
+  try { run("launchctl", ["bootstrap", `gui/${process.getuid()}`, launchAgentPath()], { capture: true }); } catch {}
+  run("launchctl", ["kickstart", "-k", `gui/${process.getuid()}/${MAC_LABEL}`]);
+}
+
 function uninstallMac() {
   const file = launchAgentPath();
   try { run("launchctl", ["bootout", `gui/${process.getuid()}`, file]); } catch {}
@@ -133,7 +139,7 @@ function serviceAction(action) {
     const target = `gui/${process.getuid()}/${MAC_LABEL}`;
     if (action === "install") return installMac();
     if (action === "uninstall") return uninstallMac();
-    if (action === "start") return run("launchctl", ["kickstart", "-k", target]);
+    if (action === "start") return startMac();
     if (action === "stop") return run("launchctl", ["bootout", `gui/${process.getuid()}`, launchAgentPath()]);
     if (action === "status") return run("launchctl", ["print", target]);
   } else {
