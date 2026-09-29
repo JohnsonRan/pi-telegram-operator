@@ -147,6 +147,14 @@ function schedulePendingRetry(state, pending) {
   pending.retryTimer.unref?.();
 }
 
+function sendSuccess(client, requestId, extra = {}) {
+  sendLine(client.socket, { type: "result", requestId, ok: true, ...extra });
+}
+
+function sendFailure(client, requestId, error) {
+  sendLine(client.socket, { type: "result", requestId, ok: false, error: errorMessage(error) });
+}
+
 function trackTask(state, promise) {
   const task = Promise.resolve(promise);
   state.activeTasks.add(task);
@@ -203,13 +211,7 @@ function handleBrokerRequest(state, client, message) {
     sendLine(client.socket, { type: "registered", version: PROTOCOL_VERSION });
     for (const question of state.pendingQuestions.values()) {
       if (question.clientId === client.clientId && question.sessionId === client.sessionId && typeof question.answer === "string") {
-        sendLine(client.socket, {
-          type: "result",
-          requestId: question.requestId,
-          questionId: question.questionId,
-          ok: true,
-          answer: question.answer,
-        });
+        sendSuccess(client, question.requestId, { questionId: question.questionId, answer: question.answer });
       }
     }
     if (client.wakeChild) deliverPendingForSession(state, client.sessionId);
@@ -254,16 +256,16 @@ function handleBrokerRequest(state, client, message) {
     if (typeof message.requestId !== "string") return;
     trackTask(state, handleStreamRequest(state, client, message)).then(() => {
       if (client.wakeChild) releaseWakeFollowups(state, client.sessionId);
-      sendLine(client.socket, { type: "result", requestId: message.requestId, ok: true });
+      sendSuccess(client, message.requestId);
     }).catch((error) => {
-      sendLine(client.socket, { type: "result", requestId: message.requestId, ok: false, error: errorMessage(error) });
+      sendFailure(client, message.requestId, error);
     });
     return;
   }
   if (message.type === "question" && client.registered && typeof message.requestId === "string") {
     const options = Array.isArray(message.options) ? message.options.map(String).filter(Boolean).slice(0, 10) : [];
     if (options.length === 0) {
-      sendLine(client.socket, { type: "result", requestId: message.requestId, ok: false, error: "Question has no selectable options" });
+      sendFailure(client, message.requestId, "Question has no selectable options");
       return;
     }
     const questionId = randomUUID();
@@ -290,32 +292,32 @@ function handleBrokerRequest(state, client, message) {
       updateDashboard(state, topic, { phase: "Waiting for answer", detail: String(message.question || "Pi needs your input") });
       return sent;
     })).catch((error) => {
-      sendLine(client.socket, { type: "result", requestId: message.requestId, ok: false, error: errorMessage(error) });
+      sendFailure(client, message.requestId, error);
     });
     return;
   }
   if (message.type === "artifact" && client.registered && typeof message.requestId === "string") {
     const topic = state.topics.get(client.sessionId);
     if (!topic) {
-      sendLine(client.socket, { type: "result", requestId: message.requestId, ok: false, error: "No Telegram topic exists for this session" });
+      sendFailure(client, message.requestId, "No Telegram topic exists for this session");
       return;
     }
     sendTopicChatAction(state, topic, "upload_document").catch(() => {});
     updateDashboard(state, topic, { phase: "Uploading artifact", detail: String(message.path || "") });
     trackTask(state, sendSessionArtifact(state.secret, { ...topic, cwd: client.cwd }, String(message.path || ""), String(message.caption || ""))).then((sent) => {
       updateDashboard(state, topic, { phase: "Ready", detail: "Artifact sent" });
-      sendLine(client.socket, { type: "result", requestId: message.requestId, ok: true, messageId: sent.message_id });
+      sendSuccess(client, message.requestId, { messageId: sent.message_id });
     }).catch((error) => {
-      sendLine(client.socket, { type: "result", requestId: message.requestId, ok: false, error: errorMessage(error) });
+      sendFailure(client, message.requestId, error);
     });
     return;
   }
   if (message.type !== "notify" || !client.registered || typeof message.requestId !== "string") return;
 
   trackTask(state, sendNotification(state, client, message)).then((sent) => {
-    sendLine(client.socket, { type: "result", requestId: message.requestId, ok: true, messageId: sent.message_id });
+    sendSuccess(client, message.requestId, { messageId: sent.message_id });
   }).catch((error) => {
-    sendLine(client.socket, { type: "result", requestId: message.requestId, ok: false, error: errorMessage(error) });
+    sendFailure(client, message.requestId, error);
   });
 }
 
