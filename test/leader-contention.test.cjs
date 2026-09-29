@@ -13,6 +13,8 @@ const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-telegram-contention-"));
+// The directory holds fake secrets; remove it however the script exits.
+process.on("exit", () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
 const statePath = path.join(dir, "pi-telegram-operator.state.json");
 const sentinel = JSON.stringify({ offset: 777, mappings: [{ messageId: 1, threadId: 2, sessionId: "live", marker: "do-not-overwrite" }], pendingReplies: [], topics: [] }, null, 2) + "\n";
 fs.writeFileSync(statePath, sentinel);

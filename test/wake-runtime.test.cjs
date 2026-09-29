@@ -13,6 +13,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-telegram-operator-wake-runtime-"));
+// The directory holds fake secrets; remove it however the script exits.
+process.on("exit", () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
 const launchLog = path.join(dir, "launches.jsonl");
 const fakePi = path.join(dir, "fake-pi.cjs");
 fs.writeFileSync(fakePi, "const fs=require('node:fs'); const payload=JSON.parse(Buffer.from(process.env.PI_TELEGRAM_WAKE_PAYLOAD,'base64url').toString('utf8')); fs.appendFileSync(" + JSON.stringify(launchLog) + ", JSON.stringify({args:process.argv.slice(2),payload}) + '\\n');\n");

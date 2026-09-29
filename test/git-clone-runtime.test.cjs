@@ -13,6 +13,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-telegram-operator-clone-runtime-"));
+// The directory holds fake secrets; remove it however the script exits.
+process.on("exit", () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
 const launchLog = path.join(dir, "launches.jsonl");
 const fakePi = path.join(dir, "fake-pi.cjs");
 const source = path.join(dir, "source", "demo.git");

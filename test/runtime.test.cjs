@@ -641,6 +641,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-telegram-operator-test-"));
+// The directory holds fake secrets; remove it however the script exits.
+process.on("exit", () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} });
 fs.writeFileSync(path.join(dir, "pi-telegram-operator.secret"), "123456:${"a".repeat(32)}\n");
 fs.writeFileSync(path.join(dir, "pi-telegram-operator.json"), JSON.stringify({ chatId: 42, allowedUserId: 42, bridgeSecret: "${"b".repeat(64)}", port: 43989, wakeMode: true, wakeDefaultCwd: dir, wakeAllowedRoots: [dir], wakeOpenTerminal: false }));
 fs.writeFileSync(path.join(dir, "pi-telegram-operator.state.json"), JSON.stringify({ offset: 0, mappings: [], pendingReplies: [], topics: [] }));
