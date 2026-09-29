@@ -49,7 +49,9 @@ function installDaemonLogging(options = {}) {
       const size = statSync(logPath).size;
       if (size > maxBytes) {
         const content = readFileSync(logPath);
-        const tailBudget = Math.max(1, maxBytes - marker.length);
+        // Keep half the budget (at least the new line) so a full log is
+        // rewritten once per maxBytes/2 of output instead of on every line.
+        const tailBudget = Math.max(1, Math.min(maxBytes - marker.length, Math.max(Buffer.byteLength(line), Math.floor(maxBytes / 2))));
         const tail = content.subarray(Math.max(0, content.length - tailBudget));
         writeFileSync(logPath, Buffer.concat([marker, tail]), { mode: 0o600 });
       }

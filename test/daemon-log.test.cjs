@@ -33,6 +33,13 @@ test("writes bounded daemon diagnostics", () => {
     assert.match(content, /\[warn\]/);
     assert.ok(Buffer.byteLength(content) <= 128);
     assert.deepEqual(captured, []);
+
+    // A full log is trimmed to half its budget, leaving room before the next rewrite.
+    consoleObject.log("a");
+    consoleObject.log("b");
+    const trimmed = readFileSync(logPath, "utf8");
+    assert.ok(Buffer.byteLength(trimmed) <= 96, trimmed);
+    assert.match(trimmed, /\[info\] b\n$/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
