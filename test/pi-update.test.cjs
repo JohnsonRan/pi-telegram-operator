@@ -49,6 +49,19 @@ test("runs pi update --all without a shell and returns bounded output", async ()
   assert.equal(calls[0].options.shell, undefined);
 });
 
+test("passes wakePiCommandArgs before the update subcommand", async () => {
+  const calls = [];
+  await runPiUpdate({
+    piCommand: "node.exe",
+    piCommandArgs: ["C:\\pi\\dist\\cli.js"],
+    spawn: (command, args) => {
+      calls.push({ command, args });
+      return fakeChild({});
+    },
+  });
+  assert.deepEqual(calls, [{ command: "node.exe", args: ["C:\\pi\\dist\\cli.js", "update", "--all"] }]);
+});
+
 test("reports Pi update failures with command output", async () => {
   await assert.rejects(() => runPiUpdate({
     spawn: () => fakeChild({ code: 1, stderr: "network unavailable" }),

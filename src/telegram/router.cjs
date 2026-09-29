@@ -250,6 +250,7 @@ async function handleControlMessage(state, message) {
     await sendBrokerText(state, "Running pi update --all…", replyOptions);
     const output = await (state.runPiUpdate || runPiUpdate)({
       piCommand: state.secret.wakePiCommand,
+      piCommandArgs: state.secret.wakePiCommandArgs,
       cwd: state.secret.wakeDefaultCwd || process.cwd(),
     });
     await sendBrokerText(state, [

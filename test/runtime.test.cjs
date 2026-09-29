@@ -169,6 +169,7 @@ test("runs the exact Pi update command from All Topics", async () => {
         token: `123456:${"a".repeat(32)}`,
         chatId: 42,
         wakePiCommand: "custom-pi",
+        wakePiCommandArgs: ["--flag"],
         wakeDefaultCwd: "C:\\Work",
         linkPreview: false,
       },
@@ -180,7 +181,7 @@ test("runs the exact Pi update command from All Topics", async () => {
   } finally {
     global.fetch = originalFetch;
   }
-  assert.deepEqual(updateCalls, [{ piCommand: "custom-pi", cwd: "C:\\Work" }]);
+  assert.deepEqual(updateCalls, [{ piCommand: "custom-pi", piCommandArgs: ["--flag"], cwd: "C:\\Work" }]);
   assert.match(sent[0].text, /Running pi update --all/);
   assert.match(sent[1].text, /Pi update completed/);
   assert.match(sent[1].text, /Updated everything/);

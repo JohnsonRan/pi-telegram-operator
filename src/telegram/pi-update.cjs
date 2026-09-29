@@ -13,9 +13,10 @@ function parsePiUpdateCommand(value) {
 
 function runPiUpdate(options = {}) {
   const piCommand = String(options.piCommand || "pi");
+  const piCommandArgs = Array.isArray(options.piCommandArgs) ? options.piCommandArgs.map(String) : [];
   const spawnProcess = options.spawn || spawn;
   return new Promise((resolve, reject) => {
-    const child = spawnProcess(piCommand, ["update", "--all"], {
+    const child = spawnProcess(piCommand, [...piCommandArgs, "update", "--all"], {
       cwd: options.cwd,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
