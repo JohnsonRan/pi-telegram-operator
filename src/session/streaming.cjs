@@ -2,7 +2,7 @@ const { randomInt } = require("node:crypto");
 const { connectClient, getClientState, initializeState, requestBroker } = require("../bridge/client.cjs");
 const { sendLine } = require("../bridge/protocol.cjs");
 const { assistantText, formatLiveStatus } = require("./live-status.cjs");
-const { errorMessage } = require("../telegram/api.cjs");
+const { warn } = require("../shared/errors.cjs");
 
 const STREAM_THROTTLE_MS = 1_200;
 const STATUS_HEARTBEAT_MS = 5_000;
@@ -72,9 +72,7 @@ function scheduleStreamDraft(state) {
     const text = streamDraftText(stream);
     if (state.currentStream !== stream || text === stream.lastSent) return;
     stream.lastSent = text;
-    sendStream(state, "streamDraft", stream).catch((error) => {
-      console.warn(`[pi-telegram-operator] Cannot stream draft: ${errorMessage(error)}`);
-    });
+    sendStream(state, "streamDraft", stream).catch(warn("Cannot stream draft"));
   }, STREAM_THROTTLE_MS);
   stream.timer.unref?.();
 }
@@ -84,9 +82,7 @@ function attach(pi) {
   attachedApis.add(pi);
 
   pi.on("session_start", (_event, ctx) => {
-    return initializeState(pi, ctx).catch((error) => {
-      console.warn(`[pi-telegram-operator] Cannot initialize: ${errorMessage(error)}`);
-    });
+    return initializeState(pi, ctx).catch(warn("Cannot initialize"));
   });
 
   pi.on("agent_start", () => {
@@ -144,9 +140,7 @@ function attach(pi) {
     stream.text = assistantText(event.message);
     const text = streamDraftText(stream);
     stream.lastSent = text;
-    sendStream(state, "streamDraft", stream).catch((error) => {
-      console.warn(`[pi-telegram-operator] Cannot start stream: ${errorMessage(error)}`);
-    });
+    sendStream(state, "streamDraft", stream).catch(warn("Cannot start stream"));
   });
 
   pi.on("message_update", (event) => {
@@ -165,9 +159,7 @@ function attach(pi) {
     stream.timer = undefined;
     stream.text = assistantText(event.message);
     state.currentStream = undefined;
-    sendStream(state, "streamFinal", stream).catch((error) => {
-      console.warn(`[pi-telegram-operator] Cannot finalize stream: ${errorMessage(error)}`);
-    });
+    sendStream(state, "streamFinal", stream).catch(warn("Cannot finalize stream"));
   });
 
   pi.on("agent_settled", () => {

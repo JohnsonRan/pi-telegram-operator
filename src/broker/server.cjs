@@ -9,7 +9,8 @@ const { sendSessionArtifact } = require("../telegram/files.cjs");
 const { dashboardKeyboard, sendTopicChatAction, updateDashboard } = require("../telegram/dashboard.cjs");
 const { questionKeyboard } = require("../telegram/questions.cjs");
 const { AGENT_DIR } = require("../shared/paths.cjs");
-const { errorMessage, telegramCall, telegramFormattedCall } = require("../telegram/api.cjs");
+const { errorMessage, warn } = require("../shared/errors.cjs");
+const { telegramCall, telegramFormattedCall } = require("../telegram/api.cjs");
 const {
   deliverPendingForSession,
   deliverPendingReply,
@@ -133,7 +134,7 @@ function schedulePendingRetry(state, pending) {
       chat_id: state.secret.chatId,
       ...(Number.isSafeInteger(pending.threadId) ? { message_thread_id: pending.threadId } : {}),
       text: "Pi could not accept this reply after several retries. Please send it again.",
-    }).catch((error) => console.warn(`[pi-telegram-operator] Cannot report failed reply: ${errorMessage(error)}`));
+    }).catch(warn("Cannot report failed reply"));
     return;
   }
   queuePersist(state).catch(() => {});
@@ -191,7 +192,7 @@ function handleBrokerRequest(state, client, message) {
       }
       if (commandsChanged) {
         topic.commands = client.commands;
-        syncTelegramCommandMenu(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot sync bot commands: ${errorMessage(error)}`));
+        syncTelegramCommandMenu(state).catch(warn("Cannot sync bot commands"));
       }
       if (topicChanged || commandsChanged) queuePersist(state).catch(() => {});
       updateDashboard(state, topic, { phase: "Connected", detail: client.sessionName || "Pi session connected" });
@@ -222,7 +223,7 @@ function handleBrokerRequest(state, client, message) {
     const question = state.pendingQuestions.get(message.questionId);
     if (question?.sessionId === client.sessionId && question.clientId === client.clientId) {
       state.pendingQuestions.delete(message.questionId);
-      queuePersist(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot persist question ACK: ${errorMessage(error)}`));
+      queuePersist(state).catch(warn("Cannot persist question ACK"));
     }
     return;
   }
@@ -240,16 +241,14 @@ function handleBrokerRequest(state, client, message) {
           state.mappings.delete(messageId);
         }
       }
-      queuePersist(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot persist reply ACK: ${errorMessage(error)}`));
+      queuePersist(state).catch(warn("Cannot persist reply ACK"));
     } else {
       schedulePendingRetry(state, pending);
     }
     return;
   }
   if (message.type === "streamDraft") {
-    trackTask(state, handleStreamRequest(state, client, message)).catch((error) => {
-      console.warn(`[pi-telegram-operator] Draft stream failed: ${errorMessage(error)}`);
-    });
+    trackTask(state, handleStreamRequest(state, client, message)).catch(warn("Draft stream failed"));
     return;
   }
   if (message.type === "streamFinal") {
@@ -430,10 +429,10 @@ async function startLocalLeader(secret) {
     onExit: (exit) => reportWakeExit(state, exit),
   });
   pruneExpiredBrokerState(state);
-  queuePersist(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot normalize state: ${errorMessage(error)}`));
+  queuePersist(state).catch(warn("Cannot normalize state"));
   state.cleanupTimer = setInterval(() => {
     if (pruneExpiredBrokerState(state)) {
-      queuePersist(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot clean state: ${errorMessage(error)}`));
+      queuePersist(state).catch(warn("Cannot clean state"));
     }
   }, STATE_CLEANUP_INTERVAL_MS);
   state.cleanupTimer.unref?.();
@@ -458,14 +457,14 @@ async function startLocalLeader(secret) {
     socket.on("error", () => {});
     socket.resume();
   });
-  server.on("error", (error) => console.warn(`[pi-telegram-operator] Broker error: ${errorMessage(error)}`));
+  server.on("error", warn("Broker error"));
   server.on("close", () => {
     state.closed = true;
     if (state.cleanupTimer) clearInterval(state.cleanupTimer);
   });
   server.unref?.();
-  syncTelegramCommandMenu(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot sync bot commands: ${errorMessage(error)}`));
-  state.pollTask = pollTelegram(state).catch((error) => console.warn(`[pi-telegram-operator] Poller stopped: ${errorMessage(error)}`));
+  syncTelegramCommandMenu(state).catch(warn("Cannot sync bot commands"));
+  state.pollTask = pollTelegram(state).catch(warn("Poller stopped"));
   return state;
 }
 

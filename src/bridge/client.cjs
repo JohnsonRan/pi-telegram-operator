@@ -6,7 +6,7 @@ const { PROTOCOL_VERSION, attachLineReader, sendLine } = require("./protocol.cjs
 const { startLocalLeader } = require("../broker/server.cjs");
 const { WINDOWS_DAEMON_MARKER } = require("../shared/paths.cjs");
 const { readSettings: readSecret } = require("../shared/settings.cjs");
-const { errorMessage } = require("../telegram/api.cjs");
+const { errorMessage, warn } = require("../shared/errors.cjs");
 
 const DAEMON_PATH = path.join(__dirname, "..", "..", "daemon.cjs");
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -224,7 +224,7 @@ function handleClientMessage(state, message) {
   } catch (error) {
     const detail = errorMessage(error);
     sendAck(false, detail);
-    console.warn(`[pi-telegram-operator] Cannot inject reply: ${detail}`);
+    warn("Cannot inject reply")(error);
   }
 }
 

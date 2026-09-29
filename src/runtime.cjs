@@ -11,7 +11,7 @@ const { initializeState, requestArtifact, requestNotification, requestQuestion }
 const { closeLeader, startLocalLeader } = require("./broker/server.cjs");
 const { readSettings: readSecret } = require("./shared/settings.cjs");
 const { attach } = require("./session/streaming.cjs");
-const { errorMessage } = require("./telegram/api.cjs");
+const { warn } = require("./shared/errors.cjs");
 
 async function notify(pi, ctx, title, body) {
   await requestNotification(await initializeState(pi, ctx), title, body);
@@ -38,7 +38,7 @@ async function runWakeDaemon() {
     }
     const stop = () => {
       stopping = true;
-      closeLeader(leader).catch((error) => console.warn(`[pi-telegram-operator] Cannot stop broker cleanly: ${errorMessage(error)}`));
+      closeLeader(leader).catch(warn("Cannot stop broker cleanly"));
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);

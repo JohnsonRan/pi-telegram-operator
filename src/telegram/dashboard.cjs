@@ -1,7 +1,8 @@
 const { queuePersist } = require("../broker/state.cjs");
 const { enqueueKeyed } = require("../shared/queue.cjs");
 const { formatLocalTimestamp } = require("../shared/time.cjs");
-const { errorMessage, telegramCall } = require("./api.cjs");
+const { errorMessage, warn } = require("../shared/errors.cjs");
+const { telegramCall } = require("./api.cjs");
 
 const CHAT_ACTION_THROTTLE_MS = 4_000;
 
@@ -73,7 +74,7 @@ async function syncTopicDashboard(state, topic, update = {}) {
       chat_id: state.secret.chatId,
       message_id: sent.message_id,
       disable_notification: true,
-    }).catch((error) => console.warn(`[pi-telegram-operator] Cannot pin session dashboard: ${errorMessage(error)}`));
+    }).catch(warn("Cannot pin session dashboard"));
     return sent.message_id;
   });
 }

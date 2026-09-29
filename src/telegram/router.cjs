@@ -10,7 +10,8 @@ const { parseSessionAction, sendTopicChatAction, syncTopicDashboard, updateDashb
 const { parseQuestionCallback } = require("./questions.cjs");
 const { cloneRepository, parseGitCloneCommand } = require("./git-clone.cjs");
 const { parsePiUpdateCommand, runPiUpdate } = require("./pi-update.cjs");
-const { errorMessage, telegramCall } = require("./api.cjs");
+const { errorMessage, warn } = require("../shared/errors.cjs");
+const { telegramCall } = require("./api.cjs");
 const { parseControlCommand, resolveWakeCwd } = require("../wake/launcher.cjs");
 
 const WAKE_REGISTRATION_TIMEOUT_MS = 15_000;
@@ -40,7 +41,7 @@ async function ensureTopic(state, sessionId, cwd, sessionName) {
     state.topics.set(sessionId, topic);
     await queuePersist(state);
     updateDashboard(state, topic, { phase: "Waiting", detail: "Session topic created" });
-    syncTelegramCommandMenu(state).catch((error) => console.warn(`[pi-telegram-operator] Cannot sync bot commands: ${errorMessage(error)}`));
+    syncTelegramCommandMenu(state).catch(warn("Cannot sync bot commands"));
     return topic;
   })().finally(() => state.topicPromises.delete(sessionId));
   state.topicPromises.set(sessionId, promise);
@@ -345,7 +346,7 @@ async function acknowledgeTelegramMessage(state, message) {
     });
     return true;
   } catch (error) {
-    console.warn(`[pi-telegram-operator] Cannot acknowledge Telegram message: ${errorMessage(error)}`);
+    warn("Cannot acknowledge Telegram message")(error);
     return false;
   }
 }
@@ -412,7 +413,7 @@ async function handleTelegramMessage(state, message) {
       text: "No active Pi session is available for this topic.",
       reply_to_message_id: message.message_id,
       ...(Number.isSafeInteger(message.message_thread_id) ? { message_thread_id: message.message_thread_id } : {}),
-    }).catch((error) => console.warn(`[pi-telegram-operator] ${errorMessage(error)}`));
+    }).catch(warn("Cannot send reply notice"));
     return;
   }
 
@@ -464,7 +465,7 @@ async function handleTelegramMessage(state, message) {
         : "Reply queued until the target Pi session reconnects.",
       reply_to_message_id: message.message_id,
       ...(Number.isSafeInteger(message.message_thread_id) ? { message_thread_id: message.message_thread_id } : {}),
-    }).catch((error) => console.warn(`[pi-telegram-operator] ${errorMessage(error)}`));
+    }).catch(warn("Cannot send reply notice"));
   }
 }
 
@@ -532,7 +533,7 @@ async function handleCallbackQuery(state, query, options = {}) {
         text: "Telegram cannot open topics automatically. Open the unread topic to see the restored context recap.",
         show_alert: true,
       } : {}),
-    }).catch((error) => console.warn(`[pi-telegram-operator] Cannot answer callback: ${errorMessage(error)}`));
+    }).catch(warn("Cannot answer callback"));
   }
   if (!authorized) return;
 
@@ -625,7 +626,7 @@ async function handleCallbackQuery(state, query, options = {}) {
     reply_markup: panel.replyMarkup,
   }).catch((error) => {
     if (!/message is not modified/i.test(errorMessage(error))) {
-      console.warn(`[pi-telegram-operator] Cannot update control panel: ${errorMessage(error)}`);
+      warn("Cannot update control panel")(error);
     }
   });
 }
@@ -652,7 +653,7 @@ async function pollTelegram(state) {
       for (const update of updates) await processTelegramUpdate(state, update);
     } catch (error) {
       if (!state.closed) {
-        console.warn(`[pi-telegram-operator] Poll failed: ${errorMessage(error)}`);
+        warn("Poll failed")(error);
         await new Promise((resolve) => setTimeout(resolve, 3_000));
       }
     } finally {

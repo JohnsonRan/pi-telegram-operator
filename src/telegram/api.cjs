@@ -1,6 +1,4 @@
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
-}
+const { errorMessage } = require("../shared/errors.cjs");
 
 async function telegramCall(secret, method, payload, timeoutMs = 20_000, externalSignal) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -67,4 +65,4 @@ async function telegramFormattedCall(secret, method, payload, plainText) {
   }
 }
 
-module.exports = Object.freeze({ errorMessage, telegramCall, telegramFormattedCall, telegramMultipartCall });
+module.exports = Object.freeze({ telegramCall, telegramFormattedCall, telegramMultipartCall });
