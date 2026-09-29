@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const { execFileSync } = require("node:child_process");
-const { mkdirSync, rmSync, writeFileSync } = require("node:fs");
+const { chmodSync, mkdirSync, rmSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { daemonLogPath } = require("./src/service/daemon-log.cjs");
@@ -61,9 +61,20 @@ function windowsTaskXml(
   return `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\n<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>${xml(userId)}</UserId></LogonTrigger></Triggers>\n<Principals><Principal id="Author"><UserId>${xml(userId)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>\n<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><AllowStartOnDemand>true</AllowStartOnDemand><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure></Settings>\n<Actions Context="Author"><Exec><Command>${xml(wscriptPath)}</Command><Arguments>${xml(argumentsText)}</Arguments><WorkingDirectory>${xml(path.dirname(daemonPath))}</WorkingDirectory></Exec></Actions>\n</Task>\n`;
 }
 
+// Quotes a systemd unit value; systemd expands % specifiers even inside quotes.
+function systemdQuote(value) {
+  return JSON.stringify(String(value)).replace(/%/g, "%%");
+}
+
+// Service definitions may hold proxy credentials, so keep them owner-only.
+function writePrivateFile(file, content) {
+  writeFileSync(file, content, { mode: 0o600 });
+  chmodSync(file, 0o600);
+}
+
 function systemdUnit(nodePath = process.execPath, daemonPath = DAEMON_PATH, agentDir = AGENT_DIR, environmentPath = process.env.PATH || "", proxy = proxyEnvironment()) {
-  const proxyLines = Object.entries(proxy).map(([key, value]) => `Environment=${JSON.stringify(`${key}=${value}`)}\n`).join("");
-  return `[Unit]\nDescription=TelegraPi Telegram operator for Pi\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart=${JSON.stringify(nodePath)} ${JSON.stringify(daemonPath)}\nEnvironment=${JSON.stringify(`PI_CODING_AGENT_DIR=${agentDir}`)}\nEnvironment=${JSON.stringify(`PATH=${environmentPath}`)}\n${proxyLines}PassEnvironment=DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR\nRestart=always\nRestartSec=3\nKillMode=process\n\n[Install]\nWantedBy=default.target\n`;
+  const proxyLines = Object.entries(proxy).map(([key, value]) => `Environment=${systemdQuote(`${key}=${value}`)}\n`).join("");
+  return `[Unit]\nDescription=TelegraPi Telegram operator for Pi\nAfter=network-online.target\n\n[Service]\nType=simple\nExecStart=${systemdQuote(nodePath)} ${systemdQuote(daemonPath)}\nEnvironment=${systemdQuote(`PI_CODING_AGENT_DIR=${agentDir}`)}\nEnvironment=${systemdQuote(`PATH=${environmentPath}`)}\n${proxyLines}PassEnvironment=DISPLAY WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR\nRestart=always\nRestartSec=3\nKillMode=process\n\n[Install]\nWantedBy=default.target\n`;
 }
 
 function launchAgent(nodePath = process.execPath, daemonPath = DAEMON_PATH, agentDir = AGENT_DIR, environmentPath = process.env.PATH || "", proxy = proxyEnvironment()) {
@@ -106,7 +117,7 @@ function uninstallWindows() {
 function installLinux() {
   const file = systemdPath();
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, systemdUnit());
+  writePrivateFile(file, systemdUnit());
   run("systemctl", ["--user", "daemon-reload"]);
   run("systemctl", ["--user", "enable", "--now", SERVICE_NAME]);
 }
@@ -120,7 +131,7 @@ function uninstallLinux() {
 function installMac() {
   const file = launchAgentPath();
   mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, launchAgent());
+  writePrivateFile(file, launchAgent());
   run("plutil", ["-lint", file]);
   try { run("launchctl", ["bootout", `gui/${process.getuid()}`, file]); } catch {}
   run("launchctl", ["bootstrap", `gui/${process.getuid()}`, file]);

@@ -117,6 +117,7 @@ test("forwards install-time proxy variables into service definitions", () => {
   const plist = launchAgent("/usr/bin/node", "/d.cjs", "/agent", "/usr/bin", { HTTPS_PROXY: "http://u:p&q@proxy:8080" });
   assert.match(plist, /<key>HTTPS_PROXY<\/key><string>http:\/\/u:p&amp;q@proxy:8080<\/string><\/dict>/);
   assert.doesNotMatch(systemdUnit("/n", "/d", "/a", "/p", {}), /PROXY/);
+  assert.match(systemdUnit("/n", "/d", "/a", "/p", { HTTPS_PROXY: "http://u:p%40ss@proxy" }), /Environment="HTTPS_PROXY=http:\/\/u:p%%40ss@proxy"/);
 });
 
 test("builds a keep-alive macOS LaunchAgent with escaped paths", () => {

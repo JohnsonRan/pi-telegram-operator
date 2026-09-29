@@ -104,7 +104,7 @@ export HTTPS_PROXY=http://127.0.0.1:7890
 export NO_PROXY=localhost,127.0.0.1
 ```
 
-The localhost broker bridge is a raw TCP socket and never uses the proxy; keep `127.0.0.1` in `NO_PROXY` if `apiBaseUrl` points at a local Bot API server. On macOS and Linux, `service.cjs install` copies these variables from the installing shell into the LaunchAgent or systemd unit, so rerun `install` after changing them; credentials in a proxy URL are then stored in that service file. On Windows the Scheduled Task uses your user environment variables, so set them with `setx` (or System Properties) and restart the service.
+The localhost broker bridge is a raw TCP socket and never uses the proxy; keep `127.0.0.1` in `NO_PROXY` if `apiBaseUrl` points at a local Bot API server. On macOS and Linux, `service.cjs install` copies these variables from the installing shell into the LaunchAgent or systemd unit, so rerun `install` after changing them; credentials in a proxy URL are then stored in that service file, which is written with owner-only (0600) permissions. On Windows the Scheduled Task uses your user environment variables, so set them with `setx` (or System Properties) and restart the service.
 
 ## Wake daemon
 
