@@ -212,8 +212,9 @@ function handleRegister(state, client, message) {
       sendSuccess(client, question.requestId, { questionId: question.questionId, answer: question.answer });
     }
   }
-  if (client.wakeChild) deliverPendingForSession(state, client.sessionId);
-  else releaseWakeFollowups(state, client.sessionId);
+  // Held follow-ups wait for a wake child's first turn; any other client takes them now.
+  deliverPendingForSession(state, client.sessionId);
+  if (!client.wakeChild) releaseWakeFollowups(state, client.sessionId);
 }
 
 function handleQuestionAck(state, client, message) {

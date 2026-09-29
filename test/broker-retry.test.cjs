@@ -32,6 +32,49 @@ test("retries a rejected reply delivery to the reconnected session", async (t) =
   await state.persistQueue;
 });
 
+function registerState(pendingReplies) {
+  return {
+    secret: { bridgeSecret: "secret" },
+    sessionCommands: new Map(),
+    topics: new Map(),
+    wakeReservations: new Set(),
+    clients: new Map(),
+    clientsBySession: new Map(),
+    pendingQuestions: new Map(),
+    mappings: new Map(),
+    pendingReplies: new Map(pendingReplies.map((item) => [item.deliveryId, item])),
+    persistQueue: Promise.resolve(),
+  };
+}
+
+function registerClient(state, wakeChild) {
+  const written = [];
+  const client = { registered: false, socket: { destroyed: false, write: (line) => written.push(JSON.parse(line)), destroy() {} } };
+  broker.handleBrokerRequest(state, client, {
+    auth: "secret", type: "register", version: 2, clientId: "client", sessionId: "session", cwd: "", wakeChild,
+  });
+  return written.filter((item) => item.type === "reply").map((item) => item.deliveryId);
+}
+
+test("delivers queued and held replies once when a regular session reconnects", async () => {
+  const state = registerState([
+    { deliveryId: "queued", sessionId: "session", text: "a", createdAt: 1 },
+    { deliveryId: "held", sessionId: "session", text: "b", createdAt: 2, holdForWake: true },
+    { deliveryId: "other", sessionId: "other", text: "c", createdAt: 3 },
+  ]);
+  assert.deepEqual(registerClient(state, false), ["queued", "held"]);
+  await state.persistQueue;
+});
+
+test("keeps held follow-ups back from a wake child until its first turn", async () => {
+  const state = registerState([
+    { deliveryId: "queued", sessionId: "session", text: "a", createdAt: 1 },
+    { deliveryId: "held", sessionId: "session", text: "b", createdAt: 2, holdForWake: true },
+  ]);
+  assert.deepEqual(registerClient(state, true), ["queued"]);
+  await state.persistQueue;
+});
+
 test("reports an abnormal wake exit in the session topic", async (t) => {
   const calls = [];
   t.mock.method(global, "fetch", async (url, init) => {
