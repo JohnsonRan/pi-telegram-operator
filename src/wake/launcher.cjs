@@ -5,6 +5,7 @@ const { mkdir, readdir, realpath, stat, unlink, writeFile } = require("node:fs/p
 const os = require("node:os");
 const path = require("node:path");
 const { isPathInside } = require("../shared/paths.cjs");
+const { appendBoundedText } = require("../shared/text.cjs");
 const { createTerminalLaunch } = require("./terminal.cjs");
 const { wakePromptArgument } = require("./payload.cjs");
 
@@ -38,13 +39,6 @@ async function prepareTerminalSpecDir(directory) {
 function killWindowsProcessTree(pid) {
   const child = execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, () => {});
   child.unref?.();
-}
-
-function appendBoundedText(current, chunk, maxBytes = MAX_STDERR_BYTES) {
-  const combined = `${current}${String(chunk)}`;
-  const bytes = Buffer.from(combined, "utf8");
-  if (bytes.length <= maxBytes) return combined;
-  return bytes.subarray(bytes.length - maxBytes).toString("utf8").replace(/^\uFFFD+/, "");
 }
 
 function parseControlCommand(value) {
@@ -241,10 +235,10 @@ class WakeLauncher {
       let terminalResult;
       let stderr = "";
       try { terminalResult = JSON.parse(readFileSync(child.terminalResultPath, "utf8")); } catch {}
-      try { stderr = appendBoundedText(stderr, readFileSync(stderrPath, "utf8")); } catch {}
+      try { stderr = appendBoundedText(stderr, readFileSync(stderrPath, "utf8"), MAX_STDERR_BYTES); } catch {}
       const effectiveCode = Number.isInteger(terminalResult?.code) ? terminalResult.code : code;
       const effectiveSignal = terminalResult?.signal || signal;
-      if (terminalResult?.error) stderr = appendBoundedText(stderr, `\n${terminalResult.error}`);
+      if (terminalResult?.error) stderr = appendBoundedText(stderr, `\n${terminalResult.error}`, MAX_STDERR_BYTES);
       const cancelled = this.cancelled.delete(sessionId);
       if (child.terminalCancelTimer) clearTimeout(child.terminalCancelTimer);
       if (terminalSpecPath) {
@@ -278,4 +272,4 @@ class WakeLauncher {
   }
 }
 
-module.exports = Object.freeze({ WakeLauncher, appendBoundedText, parseControlCommand, resolveWakeCwd });
+module.exports = Object.freeze({ WakeLauncher, parseControlCommand, resolveWakeCwd });

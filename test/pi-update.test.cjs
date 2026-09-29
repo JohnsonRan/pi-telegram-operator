@@ -4,7 +4,6 @@ const { PassThrough } = require("node:stream");
 const test = require("node:test");
 
 const {
-  appendBoundedOutput,
   parsePiUpdateCommand,
   runPiUpdate,
 } = require("../src/telegram/pi-update.cjs");
@@ -48,7 +47,6 @@ test("runs pi update --all without a shell and returns bounded output", async ()
   assert.deepEqual(calls[0].args, ["update", "--all"]);
   assert.equal(calls[0].options.cwd, "/work");
   assert.equal(calls[0].options.shell, undefined);
-  assert.ok(Buffer.byteLength(appendBoundedOutput("", "x".repeat(100), 20), "utf8") <= 20);
 });
 
 test("reports Pi update failures with command output", async () => {

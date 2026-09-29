@@ -1,4 +1,5 @@
 const { spawn } = require("node:child_process");
+const { appendBoundedText } = require("../shared/text.cjs");
 
 const UPDATE_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_UPDATE_OUTPUT_BYTES = 16 * 1024;
@@ -8,13 +9,6 @@ function parsePiUpdateCommand(value) {
   return /^(?:\/update(?:@\w+)?|pi\s+update\s+(?:--|—|–)all)$/i.test(text)
     ? { command: "update" }
     : undefined;
-}
-
-function appendBoundedOutput(current, chunk, maxBytes = MAX_UPDATE_OUTPUT_BYTES) {
-  const combined = `${current}${String(chunk)}`;
-  const bytes = Buffer.from(combined, "utf8");
-  if (bytes.length <= maxBytes) return combined;
-  return `…${bytes.subarray(bytes.length - maxBytes + 3).toString("utf8").replace(/^\uFFFD+/, "")}`;
 }
 
 function runPiUpdate(options = {}) {
@@ -27,8 +21,8 @@ function runPiUpdate(options = {}) {
       stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";
-    child.stdout?.on("data", (chunk) => { output = appendBoundedOutput(output, chunk); });
-    child.stderr?.on("data", (chunk) => { output = appendBoundedOutput(output, chunk); });
+    child.stdout?.on("data", (chunk) => { output = appendBoundedText(output, chunk, MAX_UPDATE_OUTPUT_BYTES); });
+    child.stderr?.on("data", (chunk) => { output = appendBoundedText(output, chunk, MAX_UPDATE_OUTPUT_BYTES); });
     const timer = setTimeout(() => {
       child.kill();
       reject(new Error("pi update --all timed out after 10 minutes"));
@@ -54,7 +48,6 @@ function runPiUpdate(options = {}) {
 }
 
 module.exports = Object.freeze({
-  appendBoundedOutput,
   parsePiUpdateCommand,
   runPiUpdate,
 });

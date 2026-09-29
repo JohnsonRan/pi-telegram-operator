@@ -5,7 +5,8 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { WakeLauncher, appendBoundedText, parseControlCommand, resolveWakeCwd } = require("../src/wake/launcher.cjs");
+const { WakeLauncher, parseControlCommand, resolveWakeCwd } = require("../src/wake/launcher.cjs");
+const { appendBoundedText } = require("../src/shared/text.cjs");
 const { decodeWakePayload, wakePromptArgument, WAKE_SENTINEL } = require("../src/wake/payload.cjs");
 
 test("parses General-topic wake commands", () => {
@@ -270,5 +271,5 @@ test("keeps bounded wake stderr and includes it in the exit callback", async () 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(exitResult.code, 78);
   assert.equal(exitResult.stderr, "configuration failed");
-  assert.ok(Buffer.byteLength(appendBoundedText("", "x".repeat(9000))) <= 8 * 1024);
+  assert.ok(Buffer.byteLength(appendBoundedText("", "x".repeat(9000), 8 * 1024)) <= 8 * 1024);
 });
