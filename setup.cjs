@@ -150,7 +150,7 @@ async function main() {
     let offset = existing.length > 0 ? existing[existing.length - 1].update_id + 1 : 0;
     const nonce = randomBytes(6).toString("hex");
     const expectedStart = `/start ${nonce}`;
-    stdout.write(`Open this bot on your iPhone and send exactly:\n\n${expectedStart}\n\n`);
+    stdout.write(`Open this bot in Telegram and send exactly:\n\n${expectedStart}\n\n`);
     await terminal.question("Press Enter after sending it...");
 
     stdout.write("Waiting for the one-time setup message...\n");
