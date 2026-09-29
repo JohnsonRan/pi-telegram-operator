@@ -5,6 +5,7 @@ const { chmodSync, mkdirSync, rmSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { daemonLogPath } = require("./src/service/daemon-log.cjs");
+const { errorMessage } = require("./src/shared/errors.cjs");
 const {
   AGENT_DIR,
   WINDOWS_DAEMON_MARKER,
@@ -184,7 +185,7 @@ if (require.main === module) {
     if (action === "status") console.log(`Daemon log: ${daemonLogPath(AGENT_DIR)}`);
     if (action === "uninstall") console.log(`Uninstalled ${SERVICE_NAME} for ${process.platform}.`);
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(errorMessage(error));
     process.exit(1);
   }
 }

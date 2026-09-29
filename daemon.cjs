@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { daemonLogPath, installDaemonLogging } = require("./src/service/daemon-log.cjs");
+const { errorMessage } = require("./src/shared/errors.cjs");
 const { AGENT_DIR } = require("./src/shared/paths.cjs");
 
 process.env.PI_TELEGRAM_DAEMON = "1";
@@ -14,6 +15,6 @@ console.log(`[pi-telegram-operator] Wake daemon starting (pid ${process.pid}, lo
 const { runWakeDaemon } = require("./src/runtime.cjs");
 
 runWakeDaemon().catch((error) => {
-  console.error(`[pi-telegram-operator] Wake daemon failed: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`[pi-telegram-operator] Wake daemon failed: ${errorMessage(error)}`);
   process.exitCode = 1;
 });

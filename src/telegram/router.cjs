@@ -64,14 +64,18 @@ async function withTopicRetry(state, sessionId, cwd, sessionName, operation) {
   }
 }
 
+function topicByThread(state, threadId) {
+  return Number.isSafeInteger(threadId)
+    ? [...state.topics.values()].find((topic) => topic.threadId === threadId)
+    : undefined;
+}
+
 function findReplyTarget(state, message) {
   const threadId = message?.message_thread_id;
-  if (Number.isSafeInteger(threadId)) {
-    const topic = [...state.topics.values()].find((candidate) => candidate.threadId === threadId);
-    if (topic) {
-      const mapping = [...state.mappings.values()].reverse().find((candidate) => candidate.threadId === threadId);
-      return mapping || { sessionId: topic.sessionId, threadId, createdAt: Date.now() };
-    }
+  const topic = topicByThread(state, threadId);
+  if (topic) {
+    const mapping = [...state.mappings.values()].reverse().find((candidate) => candidate.threadId === threadId);
+    return mapping || { sessionId: topic.sessionId, threadId, createdAt: Date.now() };
   }
   const replyId = message?.reply_to_message?.message_id;
   if (Number.isSafeInteger(replyId) && state.mappings.has(replyId)) return state.mappings.get(replyId);
@@ -340,9 +344,7 @@ async function handleTelegramMessage(state, message) {
   if (message.chat?.id !== state.secret.chatId || message.from?.id !== state.secret.allowedUserId) return;
   if (message.from?.is_bot === true) return;
 
-  const topicForThread = Number.isSafeInteger(message.message_thread_id)
-    ? [...state.topics.values()].find((topic) => topic.threadId === message.message_thread_id)
-    : undefined;
+  const topicForThread = topicByThread(state, message.message_thread_id);
   const threadIsKnown = Boolean(topicForThread);
   const replyOptions = { replyTo: message.message_id, threadId: message.message_thread_id };
   const attachment = attachmentFromMessage(message);

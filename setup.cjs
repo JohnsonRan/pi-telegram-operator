@@ -12,6 +12,7 @@ const {
   STATE_PATH,
 } = require("./src/shared/paths.cjs");
 const { BOT_TOKEN_PATTERN, normalizeApiBaseUrl, preserveOperationalConfig } = require("./src/shared/settings.cjs");
+const { errorMessage } = require("./src/shared/errors.cjs");
 const { telegramCall } = require("./src/telegram/api.cjs");
 
 async function portIsListening(port) {
@@ -224,7 +225,7 @@ async function main() {
 
 if (require.main === module) {
   main().catch((error) => {
-    process.stderr.write(`Setup failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(`Setup failed: ${errorMessage(error)}\n`);
     process.exitCode = 1;
   });
 }

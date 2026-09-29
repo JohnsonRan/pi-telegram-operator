@@ -1,6 +1,7 @@
 const { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } = require("node:fs");
 const path = require("node:path");
 const { format } = require("node:util");
+const { errorMessage } = require("../shared/errors.cjs");
 const { formatLocalTimestamp } = require("../shared/time.cjs");
 
 const DEFAULT_MAX_BYTES = 256 * 1024;
@@ -53,7 +54,7 @@ function installDaemonLogging(options = {}) {
         writeFileSync(logPath, Buffer.concat([marker, tail]), { mode: 0o600 });
       }
     } catch (error) {
-      original.error(`[pi-telegram-operator] Cannot write daemon log: ${error instanceof Error ? error.message : String(error)}`);
+      original.error(`[pi-telegram-operator] Cannot write daemon log: ${errorMessage(error)}`);
     }
   };
 
