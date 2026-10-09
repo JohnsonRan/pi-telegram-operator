@@ -59,6 +59,7 @@ test("selects supported Linux terminals in priority order", () => {
     nodeCommand: "/usr/bin/node",
     terminalHostPath: "/package/terminal-host.cjs",
     display: ":0",
+    runtimeEnv: {},
     findExecutable(name) {
       found.push(name);
       return name === "konsole" ? `/usr/bin/${name}` : undefined;
@@ -70,12 +71,49 @@ test("selects supported Linux terminals in priority order", () => {
   assert.equal(launch.terminal, "konsole");
 });
 
+test("tells a Bun-compiled host to run the terminal host script", () => {
+  const runtimeEnv = { BUN_BE_BUN: "1" };
+  const windows = createTerminalLaunch("C:\\Temp\\wake.json", {
+    platform: "win32",
+    nodeCommand: "C:\\Pi\\pi.exe",
+    terminalHostPath: "host.cjs",
+    powershell: "pwsh.exe",
+    runtimeEnv,
+  });
+  assert.equal(windows.env.BUN_BE_BUN, "1");
+  const mac = createTerminalLaunch("/tmp/wake.json", {
+    platform: "darwin",
+    nodeCommand: "/opt/pi",
+    terminalHostPath: "/tmp/host.cjs",
+    runtimeEnv,
+  });
+  assert.ok(mac.args.some((argument) => argument.includes(`${shellQuote("/usr/bin/env")} ${shellQuote("BUN_BE_BUN=1")} ${shellQuote("/opt/pi")}`)));
+  const linux = createTerminalLaunch("/tmp/wake.json", {
+    platform: "linux",
+    nodeCommand: "/opt/pi",
+    terminalHostPath: "/tmp/host.cjs",
+    display: ":0",
+    findExecutable: (name) => (name === "xterm" ? "/usr/bin/xterm" : undefined),
+    runtimeEnv,
+  });
+  assert.deepEqual(linux.args, ["-e", "/usr/bin/env", "BUN_BE_BUN=1", "/opt/pi", "/tmp/host.cjs", "/tmp/wake.json"]);
+});
+
+test("script runtime switch is set only on Bun and cleared for child Pi processes", () => {
+  const { clearScriptRuntimeEnv, scriptRuntimeEnv } = require("../src/shared/script-runtime.cjs");
+  assert.deepEqual(scriptRuntimeEnv({ node: "24.0.0" }), {});
+  assert.deepEqual(scriptRuntimeEnv({ node: "24.0.0", bun: "1.4.2" }), { BUN_BE_BUN: "1" });
+  const env = { BUN_BE_BUN: "1", PATH: "/bin" };
+  clearScriptRuntimeEnv(env);
+  assert.deepEqual(env, { PATH: "/bin" });
+});
+
 test("terminal host runs Pi with the stored cwd and environment", () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "pi-terminal-host-test-"));
   const fake = path.join(directory, "fake.cjs");
   const marker = path.join(directory, "marker.json");
   const specPath = path.join(directory, "wake.json");
-  writeFileSync(fake, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), value: process.env.WAKE_TEST_VALUE })); process.exitCode = 7;\n`);
+  writeFileSync(fake, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), value: process.env.WAKE_TEST_VALUE, bunSwitch: process.env.BUN_BE_BUN ?? null })); process.exitCode = 7;\n`);
   writeFileSync(specPath, JSON.stringify({
     command: process.execPath,
     args: [fake, "hello"],
@@ -85,12 +123,14 @@ test("terminal host runs Pi with the stored cwd and environment", () => {
   try {
     const child = spawnSync(process.execPath, [path.resolve(__dirname, "../src/wake/terminal-host.cjs"), specPath], {
       encoding: "utf8",
+      env: { ...process.env, BUN_BE_BUN: "1" },
       timeout: 30_000,
     });
     assert.equal(child.status, 7, child.stderr);
     const result = JSON.parse(readFileSync(marker, "utf8"));
     assert.deepEqual(result.args, ["hello"]);
     assert.equal(result.value, "inherited");
+    assert.equal(result.bunSwitch, null);
     assert.equal(realpathSync(result.cwd), realpathSync(directory));
     assert.equal(existsSync(specPath), false);
     assert.equal(existsSync(`${specPath}.pid`), false);

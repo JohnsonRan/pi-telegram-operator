@@ -5,6 +5,7 @@ const path = require("node:path");
 const { PROTOCOL_VERSION, attachLineReader, sendLine } = require("./protocol.cjs");
 const { startLocalLeader } = require("../broker/server.cjs");
 const { WINDOWS_DAEMON_MARKER } = require("../shared/paths.cjs");
+const { scriptRuntimeEnv } = require("../shared/script-runtime.cjs");
 const { readSettings: readSecret } = require("../shared/settings.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
 
@@ -22,7 +23,7 @@ async function launchDetachedWakeDaemon() {
     daemonLaunchPromise = new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [DAEMON_PATH, WINDOWS_DAEMON_MARKER], {
         detached: true,
-        env: { ...process.env, PI_TELEGRAM_DAEMON: "1" },
+        env: { ...process.env, ...scriptRuntimeEnv(), PI_TELEGRAM_DAEMON: "1" },
         stdio: "ignore",
         windowsHide: true,
       });

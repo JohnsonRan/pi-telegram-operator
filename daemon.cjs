@@ -3,7 +3,9 @@
 const { daemonLogPath, installDaemonLogging } = require("./src/service/daemon-log.cjs");
 const { errorMessage } = require("./src/shared/errors.cjs");
 const { AGENT_DIR } = require("./src/shared/paths.cjs");
+const { clearScriptRuntimeEnv } = require("./src/shared/script-runtime.cjs");
 
+clearScriptRuntimeEnv();
 process.env.PI_TELEGRAM_DAEMON = "1";
 
 const logPath = installDaemonLogging({

@@ -3,6 +3,7 @@
 const { spawn } = require("node:child_process");
 const { existsSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const readline = require("node:readline/promises");
+const { clearScriptRuntimeEnv } = require("../shared/script-runtime.cjs");
 
 let cancelPath;
 let pidPath;
@@ -52,6 +53,7 @@ async function main() {
   let cancellationRequested = false;
   try {
     const spec = readSpec();
+    clearScriptRuntimeEnv();
     const child = spawn(spec.command, spec.args.map(String), {
       cwd: spec.cwd,
       env: { ...process.env, ...(spec.env || {}) },
