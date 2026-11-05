@@ -1,4 +1,35 @@
 const MAX_SOURCE_CHARS = 3500;
+// Bot API rich messages allow 32768 characters and 500 blocks; stay well below both.
+const RICH_SOURCE_CHARS = 12000;
+// Tags a model writes on purpose in a Markdown answer. Block and structural tags (p, pre,
+// a, img, table, li, ...) stay escaped: a coding agent mostly writes those while talking
+// about HTML, and rendering them would turn the explanation into layout or drop it.
+const RICH_HTML_TAGS = new Set([
+  "b", "strong", "i", "em", "u", "ins", "s", "strike", "del", "mark", "sub", "sup",
+  "tg-spoiler", "br", "details", "summary", "tg-button", "tg-button-row",
+]);
+const VOID_TAGS = new Set(["br"]);
+const BUTTON_STYLES = new Set(["success", "danger", "primary", "link"]);
+
+// Rebuilds a button from parsed attributes, dropping everything the type does not need;
+// smuggled or duplicated attributes (e.g. a callback data payload) can never pass through.
+function canonicalButton(attributes) {
+  const parsed = new Map();
+  for (const [, name, raw = ""] of attributes.matchAll(/([:\w-]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>`]+))?/g)) {
+    if (parsed.has(name)) return '<tg-button type="disabled">';
+    parsed.set(name, raw.replace(/^["']|["']$/g, ""));
+  }
+  const style = BUTTON_STYLES.has(parsed.get("style")) ? ` style="${parsed.get("style")}"` : "";
+  if (parsed.get("type") === "url") {
+    const url = safeUrl(parsed.get("url"));
+    return url ? `<tg-button type="url"${style} url="${url}">` : '<tg-button type="disabled">';
+  }
+  if (parsed.get("type") === "copy_text") {
+    const text = parsed.get("text");
+    return text === undefined ? '<tg-button type="disabled">' : `<tg-button type="copy_text"${style} text="${escapeHtml(text)}">`;
+  }
+  return parsed.get("type") === "disabled" ? `<tg-button type="disabled"${style}>` : '<tg-button type="disabled">';
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -30,7 +61,8 @@ function renderInline(value, allowLinks = true) {
     return `${marker}${index}\uE001`;
   };
 
-  source = source.replace(/\\([\\`*_[\]()~|>#+.!-])/g, (_match, character) => token(escapeHtml(character)));
+  source = source.replace(/\\([!-/:-@[-`{-~])/g, (_match, character) => token(escapeHtml(character)));
+  source = source.replace(/&(?:lt|gt|amp|quot);/g, (entity) => token(entity));
   source = source.replace(/(`+)([^\n]*?)\1/g, (_match, _ticks, code) => token(`<code>${escapeHtml(code)}</code>`));
 
   if (allowLinks) {
@@ -130,6 +162,96 @@ function renderTelegramHtml(markdown) {
   return output.join("\n").trim();
 }
 
+// Escapes text for Markdown. Telegram's rich parser ignores `\<` and `\&`, so those
+// become entities, which the legacy renderer decodes as well.
+function escapeMarkdown(value) {
+  const entities = { "<": "&lt;", "&": "&amp;" };
+  return String(value ?? "").replace(/[!-/:-@[-`{-~]/g, (character) => entities[character] ?? `\\${character}`);
+}
+
+// Calls fn on every stretch of text outside fenced code blocks and code spans, in order.
+function mapProse(markdown, fn) {
+  let fence;
+  return String(markdown ?? "").replace(/\r\n?/g, "\n").split("\n").map((line) => {
+    if (fence) {
+      if (new RegExp(`^\\s*(?:>\\s*)*${fence[0] === "`" ? "`" : "~"}{${fence.length},}\\s*$`).test(line)) fence = undefined;
+      return line;
+    }
+    const open = line.match(/^\s*(?:>\s*)*(`{3,}|~{3,})/);
+    if (open) {
+      fence = open[1];
+      return line;
+    }
+    return line.split(/(`+[^`]*?`+)/).map((part, index) => (index % 2 ? part : fn(part))).join("");
+  }).join("\n");
+}
+
+// Classifies one tag; buttons are rebuilt in canonical form so only safe types survive.
+function richTag(text) {
+  const match = text.match(/^<(\/?)([A-Za-z][\w-]*)((?:\s[^<>]*)?)>$/);
+  const name = match?.[2].toLowerCase();
+  if (!name || !RICH_HTML_TAGS.has(name)) return undefined;
+  const selfClosing = /\/\s*$/.test(match[3]);
+  let tagText = text;
+  if (!match[1] && name === "tg-button") {
+    tagText = canonicalButton(match[3].replace(/\/\s*$/, ""));
+    if (selfClosing) tagText = `${tagText.slice(0, -1)} />`;
+  }
+  return {
+    name,
+    closing: Boolean(match[1]),
+    paired: !VOID_TAGS.has(name) && !selfClosing,
+    text: tagText,
+  };
+}
+
+// Rich Markdown accepts raw HTML but silently drops unknown tags (`Vec<String>` loses
+// `<String>`, even as `\<String>`), so tag-like text outside code becomes `&lt;` unless
+// it is a supported tag. Paired tags must balance, or a stray `<p>` would swallow text.
+function prepareRichMarkdown(markdown) {
+  const candidate = /\\?<(?!https?:\/\/|mailto:)(?=[A-Za-z/!?])(?:\/?[A-Za-z][\w-]*(?:\s[^<>]*)?>)?/g;
+  const found = [];
+  mapProse(markdown, (text) => {
+    text.replace(candidate, (match) => {
+      found.push(match.startsWith("\\") ? undefined : richTag(match));
+      return match;
+    });
+    return text;
+  });
+  const balance = new Map();
+  for (const tag of found) {
+    if (tag?.paired) balance.set(tag.name, (balance.get(tag.name) || 0) + (tag.closing ? -1 : 1));
+  }
+  let index = 0;
+  return mapProse(markdown, (text) => text.replace(candidate, (match) => {
+    const tag = found[index++];
+    return tag && !(tag.paired && balance.get(tag.name)) ? tag.text : `&lt;${match.replace(/^\\?</, "")}`;
+  }));
+}
+
+const MARKDOWN_IMAGE = /!\[([^\]\n]*)\]\(\s*(<[^>\n]+>|[^)\s]+)(\s+"[^"\n]*")?\s*\)/g;
+
+// Rewrites Markdown images outside code; fn(alt, url, title) returns the replacement.
+function mapImages(markdown, fn) {
+  return mapProse(markdown, (text) => text.replace(MARKDOWN_IMAGE, (match, alt, url, title = "") =>
+    fn(alt, url.replace(/^<|>$/g, ""), title) ?? match));
+}
+
+const isRemoteUrl = (url) => /^(?:https?|tg):/i.test(url);
+
+// A local image Telegram cannot fetch would make it reject the whole message.
+const localImageText = (alt, url) => `*${escapeMarkdown(alt || url.split(/[\\/]/).pop())}*`;
+
+// Drafts cannot upload files, so local images become their caption until the final message.
+function prepareRichDraft(markdown) {
+  return prepareRichMarkdown(mapImages(markdown, (alt, url) => (isRemoteUrl(url) ? undefined : localImageText(alt, url))));
+}
+
+// Live status in a draft-only thinking block; HTML block content is not Markdown.
+function richThinking(text) {
+  return `<tg-thinking>${String(text ?? "").split("\n").map(escapeHtml).join("<br>")}</tg-thinking>`;
+}
+
 function renderedTextLength(html) {
   return String(html ?? "")
     .replace(/<[^>]*>/g, "")
@@ -213,7 +335,15 @@ function renderTelegramChunks(markdown, renderedLimit = MAX_SOURCE_CHARS) {
 }
 
 module.exports = Object.freeze({
+  RICH_SOURCE_CHARS,
   escapeHtml,
+  escapeMarkdown,
+  isRemoteUrl,
+  localImageText,
+  mapImages,
+  prepareRichDraft,
+  prepareRichMarkdown,
+  richThinking,
   renderInline,
   renderedTextLength,
   renderTelegramChunkPairs,

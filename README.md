@@ -12,6 +12,7 @@ Pi session B  ⇄  Telegram topic "project-b · 5e6f7a8b"
 ## What you can do
 
 - **Follow along live.** Pi's replies stream into the topic, along with what it is doing right now (thinking, which tool it is running, subagent progress).
+- **Read rich Markdown.** Replies are sent as Telegram rich messages, so tables, headings, task lists, footnotes, and formulas render natively, as do inline HTML tags such as `<u>`, `<sup>`, `<mark>`, `<br>`, and `<details>`, plus URL and copy buttons. Local images such as `![chart](./chart.png)` inside the session folder are uploaded inline, and live status shows as a thinking block. Bot API servers without rich messages get the classic HTML formatting.
 - **Reply from anywhere.** Your message reaches that session: it starts a new turn if Pi is idle, or steers the current turn if Pi is busy. Sessions never see each other's messages.
 - **Control the session with buttons.** Each topic has a pinned status card with **Continue**, **Stop**, **Retry**, and **Refresh status** buttons.
 - **Answer Pi's questions.** When Pi asks a multiple-choice question, you get tap-to-answer buttons.
@@ -161,7 +162,7 @@ Settings in `pi-telegram-operator.json`:
 | `chatId`, `allowedUserId` | set by setup | The only Telegram chat and user the bot listens to |
 | `bridgeSecret` | generated | Secret used by local Pi processes to talk to each other |
 | `port` | `43871` | Local port for that connection (`127.0.0.1` only) |
-| `linkPreview` | `false` | Show link previews in messages |
+| `linkPreview` | `false` | Show link previews in messages (classic HTML formatting only) |
 | `apiBaseUrl` | `https://api.telegram.org` | Telegram Bot API endpoint (see [Network](#network)) |
 | `wakeMode` | `false` | Enable [wake mode](#wake-mode-optional) |
 | `wakeDefaultCwd` | `""` | Folder used by `/new \| …` and `/clone` |

@@ -37,8 +37,8 @@ async function postTelegram(secret, method, init, timeoutMs, externalSignal) {
   });
 }
 
-async function telegramCall(secret, method, payload, timeoutMs = 20_000, externalSignal) {
-  const init = { headers: { "content-type": "application/json; charset=utf-8" }, body: JSON.stringify(payload) };
+// Retries once after Telegram flood control when the wait is sane; init and form bodies are reusable.
+async function retryOnFloodControl(secret, method, init, timeoutMs, externalSignal) {
   try {
     return await postTelegram(secret, method, init, timeoutMs, externalSignal);
   } catch (error) {
@@ -49,8 +49,13 @@ async function telegramCall(secret, method, payload, timeoutMs = 20_000, externa
   }
 }
 
+async function telegramCall(secret, method, payload, timeoutMs = 20_000, externalSignal) {
+  const init = { headers: { "content-type": "application/json; charset=utf-8" }, body: JSON.stringify(payload) };
+  return retryOnFloodControl(secret, method, init, timeoutMs, externalSignal);
+}
+
 function telegramMultipartCall(secret, method, form, timeoutMs = 60_000) {
-  return postTelegram(secret, method, { body: form }, timeoutMs);
+  return retryOnFloodControl(secret, method, { body: form }, timeoutMs);
 }
 
 async function telegramFormattedCall(secret, method, payload, plainText) {
@@ -64,4 +69,25 @@ async function telegramFormattedCall(secret, method, payload, plainText) {
   }
 }
 
-module.exports = Object.freeze({ DEFAULT_API_BASE_URL, telegramCall, telegramFormattedCall, telegramMultipartCall, telegramUrl });
+// Bot API 10.1+ rich messages render Markdown tables, headings, lists and more natively.
+// Older or self-hosted Bot API servers answer 404 for the methods; then stay on legacy HTML.
+let richUnsupported = false;
+
+// files ({ field, data, name }) turn the call into multipart for attach:// media.
+async function telegramRichCall(secret, method, payload, legacy, files = []) {
+  if (!richUnsupported && payload.rich_message?.markdown?.trim()) {
+    try {
+      if (!files.length) return await telegramCall(secret, method, payload);
+      const form = new FormData();
+      for (const [key, value] of Object.entries(payload)) form.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+      for (const file of files) form.set(file.field, new Blob([file.data]), file.name);
+      return await telegramMultipartCall(secret, method, form);
+    } catch (error) {
+      if (error.status === 404) richUnsupported = true;
+      else if (error.status !== 400) throw error;
+    }
+  }
+  return legacy();
+}
+
+module.exports = Object.freeze({ DEFAULT_API_BASE_URL, telegramCall, telegramFormattedCall, telegramRichCall, telegramMultipartCall, telegramUrl });

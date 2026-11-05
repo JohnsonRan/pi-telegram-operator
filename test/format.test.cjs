@@ -112,3 +112,29 @@ test("honors escaped delimiters and cannot collide with protected token markers"
   assert.match(html, new RegExp(marker));
   assert.match(html, /<code>code<\/code>/);
 });
+
+test("escapes stray tags for rich Markdown but keeps code, autolinks and inline formatting tags", () => {
+  const { escapeMarkdown, prepareRichMarkdown, renderTelegramHtml: render } = require("../src/telegram/format.cjs");
+  const source = [
+    "Use Vec<String> or </div>, keep <u>under</u> and <https://t.me>",
+    "inline `Vec<T>` stays",
+    "```rust",
+    "let v: Vec<String> = vec![];",
+    "```",
+    "| A | B |",
+    "|---|---|",
+    "| <x> | 1 |",
+  ].join("\n");
+  assert.equal(prepareRichMarkdown(source), [
+    "Use Vec&lt;String> or &lt;/div>, keep <u>under</u> and <https://t.me>",
+    "inline `Vec<T>` stays",
+    "```rust",
+    "let v: Vec<String> = vec![];",
+    "```",
+    "| A | B |",
+    "|---|---|",
+    "| &lt;x> | 1 |",
+  ].join("\n"));
+  assert.equal(escapeMarkdown("a*b <c>"), "a\\*b &lt;c\\>");
+  assert.equal(render(`**${escapeMarkdown("Q <one> & $x=1")}**`), "<b>Q &lt;one&gt; &amp; $x=1</b>");
+});

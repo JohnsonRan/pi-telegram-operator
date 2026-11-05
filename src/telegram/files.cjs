@@ -5,7 +5,9 @@ const path = require("node:path");
 const { Readable, Transform } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
 const { isPathInside } = require("../shared/paths.cjs");
+const { fileURLToPath } = require("node:url");
 const { telegramCall, telegramMultipartCall, telegramUrl } = require("./api.cjs");
+const { isRemoteUrl, localImageText, mapImages } = require("./format.cjs");
 
 const MAX_INBOUND_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_OUTBOUND_FILE_BYTES = 50 * 1024 * 1024;
@@ -94,7 +96,8 @@ async function downloadTelegramAttachment(secret, message, topic) {
   };
 }
 
-async function sendSessionArtifact(secret, topic, requestedPath, caption = "") {
+// Reads a regular file inside the session cwd, guarding against symlink and swap tricks.
+async function readSessionFile(topic, requestedPath, maxBytes = MAX_OUTBOUND_FILE_BYTES) {
   const cwd = await realpath(topic.cwd);
   const candidate = path.isAbsolute(requestedPath)
     ? path.resolve(requestedPath)
@@ -110,11 +113,58 @@ async function sendSessionArtifact(secret, topic, requestedPath, caption = "") {
     if (reopened !== file) throw new Error("Artifact path changed during validation");
     info = await handle.stat();
     if (!info.isFile()) throw new Error("Artifact path is not a regular file");
-    if (info.size > MAX_OUTBOUND_FILE_BYTES) throw new Error("Artifact exceeds the 50 MiB upload limit");
+    if (info.size > maxBytes) throw new Error(`Artifact exceeds the ${Math.round(maxBytes / 1024 / 1024)} MiB upload limit`);
     data = await handle.readFile();
   } finally {
     await handle.close();
   }
+  return { file, data, size: info.size };
+}
+
+// Only real media: a Markdown image pointing at .env, a log or an archive is never uploaded.
+const MAX_RICH_MEDIA_BYTES = 20 * 1024 * 1024;
+const RICH_MEDIA_TYPES = [
+  { pattern: /\.(?:jpe?g|png|webp)$/i, type: "photo", link: "photo", maxBytes: MAX_PHOTO_BYTES },
+  { pattern: /\.gif$/i, type: "animation", link: "video", maxBytes: MAX_RICH_MEDIA_BYTES },
+  { pattern: /\.(?:mp4|mov|webm)$/i, type: "video", link: "video", maxBytes: MAX_RICH_MEDIA_BYTES },
+  { pattern: /\.(?:ogg|oga|opus)$/i, type: "voice_note", link: "audio", maxBytes: MAX_RICH_MEDIA_BYTES },
+  { pattern: /\.(?:mp3|m4a|flac|wav|aac)$/i, type: "audio", link: "audio", maxBytes: MAX_RICH_MEDIA_BYTES },
+];
+const MAX_RICH_MEDIA_FILES = 10;
+
+// Uploads local Markdown images (`![alt](./chart.png)`) inside the session cwd with a rich
+// message. Returns the rewritten Markdown, its media list and the files to attach. Other
+// local images become their caption, since Telegram would reject the whole message.
+async function richLocalMedia(topic, markdown) {
+  const urls = new Set();
+  mapImages(markdown, (_alt, url) => { if (!isRemoteUrl(url)) urls.add(url); });
+  const found = new Map();
+  for (const url of urls) {
+    if (found.size >= MAX_RICH_MEDIA_FILES) break;
+    let requested = url;
+    try {
+      requested = /^file:/i.test(url) ? fileURLToPath(url) : decodeURI(url);
+    } catch {}
+    const kind = RICH_MEDIA_TYPES.find((candidate) => candidate.pattern.test(requested));
+    if (!kind) continue;
+    const read = await readSessionFile(topic, requested, kind.maxBytes).catch(() => undefined);
+    // Check the resolved name as well, so a chart.png symlink cannot upload .env.
+    if (read && kind.pattern.test(read.file)) found.set(url, { ...read, id: `m${found.size}`, type: kind.type, link: kind.link });
+  }
+  const media = [...found.values()];
+  return {
+    markdown: mapImages(markdown, (alt, url, title) => {
+      if (isRemoteUrl(url)) return undefined;
+      const item = found.get(url);
+      return item ? `![${alt}](tg://${item.link}?id=${item.id}${title})` : localImageText(alt, url);
+    }),
+    media: media.map((item) => ({ id: item.id, media: { type: item.type, media: `attach://${item.id}` } })),
+    files: media.map((item) => ({ field: item.id, data: item.data, name: path.basename(item.file) })),
+  };
+}
+
+async function sendSessionArtifact(secret, topic, requestedPath, caption = "") {
+  const { file, data, size } = await readSessionFile(topic, requestedPath);
   const extension = path.extname(file).toLowerCase();
   const makeForm = (field) => {
     const form = new FormData();
@@ -124,7 +174,7 @@ async function sendSessionArtifact(secret, topic, requestedPath, caption = "") {
     if (String(caption).trim()) form.set("caption", String(caption).slice(0, 1024));
     return form;
   };
-  if (IMAGE_EXTENSIONS.has(extension) && info.size <= MAX_PHOTO_BYTES) {
+  if (IMAGE_EXTENSIONS.has(extension) && size <= MAX_PHOTO_BYTES) {
     try {
       return await telegramMultipartCall(secret, "sendPhoto", makeForm("photo"));
     } catch (error) {
@@ -139,6 +189,7 @@ module.exports = Object.freeze({
   MAX_OUTBOUND_FILE_BYTES,
   attachmentFromMessage,
   downloadTelegramAttachment,
+  richLocalMedia,
   safeFileName,
   sendSessionArtifact,
 });

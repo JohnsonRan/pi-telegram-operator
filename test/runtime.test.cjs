@@ -671,13 +671,13 @@ global.fetch = async (url, options) => {
     const threadId = ++nextThread;
     return response({ message_thread_id: threadId, name: body.name });
   }
-  if (method === "sendMessageDraft") {
-    drafts.push(body);
+  if (method === "sendRichMessageDraft") {
+    drafts.push({ ...body, text: body.rich_message.markdown });
     return response(true);
   }
-  if (method === "sendMessage") {
+  if (method === "sendRichMessage") {
     const sent = { message_id: ++nextMessage, chat: { id: 42 }, message_thread_id: body.message_thread_id };
-    if (body.parse_mode === "HTML" && body.reply_markup) {
+    if (body.reply_markup) {
       notificationByThread.set(body.message_thread_id, sent.message_id);
       notificationMessages.push(body);
     } else finalMessages.push(body);
@@ -812,10 +812,11 @@ async function emit(pi, event, payload, ctx) {
   assert.deepEqual(result.topicThreads, [701, 702]);
   assert.equal(result.mappings, 0);
   assert.equal(result.pendingReplies, 0);
-  assert.ok(result.notificationMessages.some((message) => message.parse_mode === "HTML" && message.link_preview_options?.is_disabled === true && message.text.includes("<b>Question &lt;one&gt;</b>") && message.text.includes("Reply <b>one</b>") && message.reply_markup.inline_keyboard[0][0].text === "Continue"));
+  assert.ok(result.notificationMessages.some((message) => message.rich_message.markdown === "**Question &lt;one\\>**\n\nReply **one**" && message.reply_markup.inline_keyboard[0][0].text === "Continue"));
+  assert.ok(result.drafts.some((draft) => draft.text.startsWith("<tg-thinking>"), "status drafts render as a thinking block"));
   assert.ok(result.drafts.some((draft) => draft.text.includes("Main agent · Turn 1")));
   assert.ok(result.drafts.some((draft) => draft.text.includes("Subagents · 0/1 done · 1 running") && draft.text.includes("reviewer · read · src/runtime.cjs")));
-  assert.ok(result.finalMessages.some((message) => message.parse_mode === "HTML" && message.link_preview_options?.is_disabled === true && message.text === "Streaming hello"));
+  assert.ok(result.finalMessages.some((message) => message.rich_message.markdown === "Streaming hello"));
   assert.ok(result.botCommandMenus.some((commands) => commands.some((command) => command.command === "new")));
   assert.ok(result.botCommandMenus.some((commands) => commands.some((command) => command.command === "ctx_stats")));
   assert.ok(result.botCommandMenus.every((commands) => commands.every((command) => command.command !== "telegram_wake")));

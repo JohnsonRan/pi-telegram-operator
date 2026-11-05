@@ -31,6 +31,8 @@ async function sendStream(state, type, stream) {
     sessionId: state.sessionId,
     draftId: stream.draftId,
     text: streamDraftText(stream),
+    // Live status (no reply text yet) is shown as a Telegram thinking block.
+    status: !stream.text.trim(),
   });
 }
 

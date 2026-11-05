@@ -4,13 +4,22 @@ const path = require("node:path");
 const { PROTOCOL_VERSION, attachLineReader, sendLine } = require("../bridge/protocol.cjs");
 const { MAX_PENDING_QUESTIONS, pruneExpiredBrokerState, queuePersist, readBrokerState, trimMappings } = require("./state.cjs");
 const { formatWakeExitDetail, normalizePiCommands } = require("../telegram/control.cjs");
-const { escapeHtml, renderTelegramChunkPairs, renderTelegramHtml, splitMarkdown } = require("../telegram/format.cjs");
-const { sendSessionArtifact } = require("../telegram/files.cjs");
+const {
+  RICH_SOURCE_CHARS,
+  escapeMarkdown,
+  prepareRichDraft,
+  prepareRichMarkdown,
+  renderTelegramChunkPairs,
+  richThinking,
+  renderTelegramHtml,
+  splitMarkdown,
+} = require("../telegram/format.cjs");
+const { richLocalMedia, sendSessionArtifact } = require("../telegram/files.cjs");
 const { dashboardKeyboard, sendTopicChatAction, updateDashboard } = require("../telegram/dashboard.cjs");
 const { questionKeyboard } = require("../telegram/questions.cjs");
 const { AGENT_DIR } = require("../shared/paths.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
-const { telegramCall, telegramFormattedCall } = require("../telegram/api.cjs");
+const { telegramCall, telegramFormattedCall, telegramRichCall } = require("../telegram/api.cjs");
 const {
   deliverPendingForSession,
   deliverPendingReply,
@@ -27,39 +36,55 @@ const { version: PACKAGE_VERSION } = require("../../package.json");
 
 const STATE_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
+// Sends Markdown as rich messages; a piece the API rejects goes out as legacy HTML chunks.
+async function sendMarkdown(state, topic, markdown, replyMarkup) {
+  const target = { chat_id: state.secret.chatId, message_thread_id: topic.threadId };
+  const pieces = splitMarkdown(markdown, RICH_SOURCE_CHARS);
+  let sent;
+  for (let index = 0; index < pieces.length; index += 1) {
+    const extra = replyMarkup && index === pieces.length - 1 ? { reply_markup: replyMarkup } : {};
+    const local = await richLocalMedia(topic, pieces[index]);
+    sent = await telegramRichCall(state.secret, "sendRichMessage", {
+      ...target,
+      rich_message: { markdown: prepareRichMarkdown(local.markdown), ...(local.media.length ? { media: local.media } : {}) },
+      ...extra,
+    }, async () => {
+      let result;
+      const chunks = renderTelegramChunkPairs(pieces[index]);
+      for (let chunk = 0; chunk < chunks.length; chunk += 1) {
+        result = await telegramFormattedCall(state.secret, "sendMessage", {
+          ...target,
+          text: chunks[chunk].html,
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: !state.secret.linkPreview },
+          ...(chunk === chunks.length - 1 ? extra : {}),
+        }, chunks[chunk].source);
+      }
+      return result;
+    }, local.files);
+  }
+  return sent;
+}
+
+// Keeps the end of a long streaming text, marking the cut with an ellipsis line.
+function draftTail(text, limit) {
+  const chunks = splitMarkdown(text, limit);
+  const tail = chunks[chunks.length - 1] || "";
+  // Keep the ellipsis on its own line so a leading code fence still parses.
+  return { tail, preview: chunks.length > 1 ? `…\n${tail}` : tail };
+}
+
 async function sendNotification(state, client, message) {
   const title = String(message.title || "Pi").slice(0, 256);
   const body = String(message.body || "");
   const sessionId = String(message.sessionId || client.sessionId);
-  const bodySources = splitMarkdown(body, 3200);
-  const bodyHtml = bodySources.map(renderTelegramHtml);
+  const markdown = `**${escapeMarkdown(title)}**${body ? `\n\n${body}` : ""}`;
   const sent = await withTopicRetry(
     state,
     sessionId,
     message.cwd || client.cwd,
     message.sessionName || client.sessionName,
-    async (topic) => {
-      let result;
-      for (let index = 0; index < bodyHtml.length; index += 1) {
-        const first = index === 0;
-        const last = index === bodyHtml.length - 1;
-        const html = first
-          ? `<b>${escapeHtml(title)}</b>${bodyHtml[index] ? `\n\n${bodyHtml[index]}` : ""}`
-          : bodyHtml[index];
-        const plain = first
-          ? `${title}${bodySources[index] ? `\n\n${bodySources[index]}` : ""}`
-          : bodySources[index];
-        result = await telegramFormattedCall(state.secret, "sendMessage", {
-          chat_id: state.secret.chatId,
-          message_thread_id: topic.threadId,
-          text: html,
-          parse_mode: "HTML",
-          link_preview_options: { is_disabled: !state.secret.linkPreview },
-          ...(last ? { reply_markup: dashboardKeyboard(topic) } : {}),
-        }, plain);
-      }
-      return { result, topic };
-    },
+    async (topic) => ({ result: await sendMarkdown(state, topic, markdown, dashboardKeyboard(topic)), topic }),
   );
   const topic = sent.topic;
   const sentMessage = sent.result;
@@ -88,38 +113,29 @@ function handleStreamRequest(state, client, message) {
     client.sessionName,
     async (topic) => {
       if (message.type === "streamDraft") {
-        const sourceChunks = splitMarkdown(text);
-        const tail = sourceChunks[sourceChunks.length - 1] || "";
-        // Keep the ellipsis on its own line so a leading code fence still parses.
-        const preview = sourceChunks.length > 1 ? `…\n${tail}` : tail;
-        const html = renderTelegramHtml(preview);
+        const { tail, preview } = draftTail(text, RICH_SOURCE_CHARS);
         sendTopicChatAction(state, topic).catch(() => {});
         if (topic.dashboardStatus?.phase !== "Working") {
           const detail = tail.split("\n").find((line) => line.trim() && !/^\s*```/.test(line)) || "";
           updateDashboard(state, topic, { phase: "Working", detail });
         }
-        await telegramFormattedCall(state.secret, "sendMessageDraft", {
-          chat_id: state.secret.chatId,
-          message_thread_id: topic.threadId,
-          draft_id: message.draftId,
-          text: html,
-          ...(html ? { parse_mode: "HTML" } : {}),
-        }, preview);
+        const target = { chat_id: state.secret.chatId, message_thread_id: topic.threadId, draft_id: message.draftId };
+        await telegramRichCall(state.secret, "sendRichMessageDraft", {
+          ...target,
+          rich_message: { markdown: message.status ? richThinking(preview) : prepareRichDraft(preview) },
+        }, () => {
+          const legacy = draftTail(text).preview;
+          const html = renderTelegramHtml(legacy);
+          return telegramFormattedCall(state.secret, "sendMessageDraft", {
+            ...target,
+            text: html,
+            ...(html ? { parse_mode: "HTML" } : {}),
+          }, legacy);
+        });
         return;
       }
       if (message.type === "streamFinal") {
-        if (text.trim()) {
-          const chunks = renderTelegramChunkPairs(text);
-          for (const chunk of chunks) {
-            await telegramFormattedCall(state.secret, "sendMessage", {
-              chat_id: state.secret.chatId,
-              message_thread_id: topic.threadId,
-              text: chunk.html,
-              parse_mode: "HTML",
-              link_preview_options: { is_disabled: !state.secret.linkPreview },
-            }, chunk.source);
-          }
-        }
+        if (text.trim()) await sendMarkdown(state, topic, text);
         updateDashboard(state, topic, { phase: "Ready", detail: "Waiting for input" });
       }
     },
