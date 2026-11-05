@@ -78,3 +78,11 @@ test("persists and reads only the canonical broker state", async () => {
     await rm(paths.directory, { recursive: true, force: true });
   }
 });
+
+test("apiBaseUrl rejects credentials, queries and non-http schemes", () => {
+  const { normalizeApiBaseUrl } = require("../src/shared/settings.cjs");
+  assert.equal(normalizeApiBaseUrl("http://127.0.0.1:8081/"), "http://127.0.0.1:8081");
+  for (const bad of ["https://user:pass@api.example", "https://user@api.example", "https://api.example/?x=1", "ftp://api.example"]) {
+    assert.throws(() => normalizeApiBaseUrl(bad), /apiBaseUrl/);
+  }
+});

@@ -172,12 +172,16 @@ test("terminal host waits for Enter after an interactive error", async () => {
   const output = new PassThrough();
   input.isTTY = true;
   output.isTTY = true;
+  // readline writes cursor escapes and the prompt as separate chunks; a single read()
+  // can return only the first one, so collect everything written.
+  let written = "";
+  output.on("data", (chunk) => { written += chunk; });
 
   const waiting = waitForEnterAfterError(input, output);
   input.write("\n");
   await waiting;
 
-  assert.match(output.read().toString(), /Press Enter to close this terminal/);
+  assert.match(written, /Press Enter to close this terminal/);
 });
 
 test("terminal host does not wait without an interactive terminal", async () => {
