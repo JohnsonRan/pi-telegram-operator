@@ -84,10 +84,13 @@ async function telegramRichCall(secret, method, payload, legacy, files = []) {
       return await telegramMultipartCall(secret, method, form);
     } catch (error) {
       if (error.status === 404) richUnsupported = true;
-      else if (error.status !== 400) throw error;
+      // An unchanged edit is not a formatting failure; a legacy retry would downgrade it.
+      else if (error.status !== 400 || /message is not modified/i.test(errorMessage(error))) throw error;
     }
   }
   return legacy();
 }
 
-module.exports = Object.freeze({ DEFAULT_API_BASE_URL, telegramCall, telegramFormattedCall, telegramRichCall, telegramMultipartCall, telegramUrl });
+const richEnabled = () => !richUnsupported;
+
+module.exports = Object.freeze({ DEFAULT_API_BASE_URL, richEnabled, telegramCall, telegramFormattedCall, telegramRichCall, telegramMultipartCall, telegramUrl });

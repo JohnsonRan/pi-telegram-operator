@@ -48,6 +48,18 @@ test("a server error is rethrown and legacy is not attempted", async () => {
   assert.equal(legacy, 0);
 });
 
+test("an unchanged edit is rethrown instead of being downgraded to legacy", async () => {
+  let legacy = 0;
+  await withFetch(
+    () => ({ ok: false, status: 400, json: async () => ({ ok: false, description: "Bad Request: message is not modified" }) }),
+    () => assert.rejects(
+      telegramRichCall(secret, "editMessageText", { ...rich, message_id: 5 }, () => { legacy += 1; }),
+      /message is not modified/,
+    ),
+  );
+  assert.equal(legacy, 0);
+});
+
 test("empty markdown goes straight to legacy without any fetch", async () => {
   let legacy = 0;
   const { calls, value } = await withFetch(() => ok, () => telegramRichCall(

@@ -18,7 +18,7 @@ test("creates, pins, and edits one dashboard per session topic", async () => {
     const method = String(url).split("/").pop();
     const body = JSON.parse(options.body);
     calls.push({ method, body });
-    return new Response(JSON.stringify({ ok: true, result: method === "sendMessage" ? { message_id: 99 } : true }), {
+    return new Response(JSON.stringify({ ok: true, result: method === "sendRichMessage" ? { message_id: 99 } : true }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -29,8 +29,13 @@ test("creates, pins, and edits one dashboard per session topic", async () => {
     await syncTopicDashboard(state, topic, { phase: "Working", detail: "npm test" });
     await syncTopicDashboard(state, topic, { phase: "Ready", detail: "Waiting for input" });
     assert.equal(topic.dashboardMessageId, 99);
-    assert.deepEqual(calls.slice(0, 3).map((item) => item.method), ["sendMessage", "pinChatMessage", "editMessageText"]);
+    assert.deepEqual(calls.slice(0, 3).map((item) => item.method), ["sendRichMessage", "pinChatMessage", "editMessageText"]);
     assert.match(dashboardText(topic), /Status: Ready/);
+    const edited = calls[2].body.rich_message.markdown;
+    assert.match(edited, /^\*\*Pi session 12345678\*\* · Ready/);
+    assert.ok(edited.includes("- **Folder:** C:\\\\Work"));
+    assert.match(edited, /\]\(tg:\/\/time\?unix=\d+&format=dT\)$/);
+    assert.ok(calls[2].body.reply_markup.inline_keyboard.length);
     assert.equal(parseSessionAction(`session:${sessionId}:continue`).action, "continue");
   } finally {
     global.fetch = originalFetch;

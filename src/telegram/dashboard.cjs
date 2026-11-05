@@ -2,7 +2,8 @@ const { queuePersist } = require("../broker/state.cjs");
 const { enqueueKeyed } = require("../shared/queue.cjs");
 const { formatLocalTimestamp } = require("../shared/time.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
-const { telegramCall } = require("./api.cjs");
+const { telegramCall, telegramRichCall } = require("./api.cjs");
+const { escapeMarkdown } = require("./format.cjs");
 
 const CHAT_ACTION_THROTTLE_MS = 4_000;
 
@@ -39,6 +40,20 @@ function dashboardText(topic) {
   ].join("\n");
 }
 
+// Rich version of dashboardText. Every value is escaped; the timestamp is a Telegram
+// date-time entity, so it shows in the reader's own time zone.
+function dashboardMarkdown(topic) {
+  const status = topic.dashboardStatus || {};
+  const updatedAt = status.updatedAt || Date.now();
+  return [
+    `**Pi session ${topic.sessionId.slice(0, 8)}** · ${escapeMarkdown(status.phase || "Waiting")}`,
+    "",
+    `- **Folder:** ${escapeMarkdown(topic.cwd || "unknown")}`,
+    ...(status.detail ? [`- **Activity:** ${escapeMarkdown(String(status.detail).slice(0, 500).replace(/\s+/g, " "))}`] : []),
+    `- **Updated:** ![${escapeMarkdown(formatLocalTimestamp(updatedAt))}](tg://time?unix=${Math.floor(updatedAt / 1000)}&format=dT)`,
+  ].join("\n");
+}
+
 async function syncTopicDashboard(state, topic, update = {}) {
   topic.dashboardStatus = {
     phase: String(update.phase || topic.dashboardStatus?.phase || "Waiting"),
@@ -46,18 +61,15 @@ async function syncTopicDashboard(state, topic, update = {}) {
     updatedAt: Date.now(),
   };
   return enqueueKeyed(state.dashboardQueues, topic.sessionId, async () => {
-    const payload = {
-      chat_id: state.secret.chatId,
-      text: dashboardText(topic),
-      link_preview_options: { is_disabled: true },
-      reply_markup: dashboardKeyboard(topic),
-    };
+    const base = { chat_id: state.secret.chatId, reply_markup: dashboardKeyboard(topic) };
+    const payload = { ...base, text: dashboardText(topic), link_preview_options: { is_disabled: true } };
+    const rich = { ...base, rich_message: { markdown: dashboardMarkdown(topic) } };
+    // Rich first, plain text when the server or this message cannot take rich content.
+    const call = (richMethod, method, extra) => telegramRichCall(state.secret, richMethod, { ...rich, ...extra }, () =>
+      telegramCall(state.secret, method, { ...payload, ...extra }));
     if (Number.isSafeInteger(topic.dashboardMessageId)) {
       try {
-        await telegramCall(state.secret, "editMessageText", {
-          ...payload,
-          message_id: topic.dashboardMessageId,
-        });
+        await call("editMessageText", "editMessageText", { message_id: topic.dashboardMessageId });
         return topic.dashboardMessageId;
       } catch (error) {
         if (/message is not modified/i.test(errorMessage(error))) return topic.dashboardMessageId;
@@ -65,10 +77,7 @@ async function syncTopicDashboard(state, topic, update = {}) {
         delete topic.dashboardMessageId;
       }
     }
-    const sent = await telegramCall(state.secret, "sendMessage", {
-      ...payload,
-      message_thread_id: topic.threadId,
-    });
+    const sent = await call("sendRichMessage", "sendMessage", { message_thread_id: topic.threadId });
     topic.dashboardMessageId = sent.message_id;
     await telegramCall(state.secret, "pinChatMessage", {
       chat_id: state.secret.chatId,
@@ -98,6 +107,7 @@ async function sendTopicChatAction(state, topic, action = "typing") {
 
 module.exports = Object.freeze({
   dashboardKeyboard,
+  dashboardMarkdown,
   dashboardText,
   parseSessionAction,
   sendTopicChatAction,

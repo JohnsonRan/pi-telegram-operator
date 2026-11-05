@@ -10,7 +10,8 @@ const { parseQuestionCallback } = require("./questions.cjs");
 const { cloneRepository, parseGitCloneCommand } = require("./git-clone.cjs");
 const { parsePiUpdateCommand, runPiUpdate } = require("./pi-update.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
-const { telegramCall } = require("./api.cjs");
+const { telegramCall, telegramRichCall } = require("./api.cjs");
+const { escapeMarkdown, prepareRichMarkdown } = require("./format.cjs");
 const { parseControlCommand, resolveWakeCwd } = require("../wake/launcher.cjs");
 
 const WAKE_REGISTRATION_TIMEOUT_MS = 15_000;
@@ -537,12 +538,15 @@ async function handleCallbackQuery(state, query, options = {}) {
       callback_query_id: query.id,
       text: `Selected: ${String(selectedAnswer).slice(0, 150)}`,
     }).catch(() => {});
-    await telegramCall(state.secret, "editMessageText", {
-      chat_id: state.secret.chatId,
-      message_id: pendingQuestion.messageId,
+    const edited = { chat_id: state.secret.chatId, message_id: pendingQuestion.messageId };
+    await telegramRichCall(state.secret, "editMessageText", {
+      ...edited,
+      rich_message: { markdown: prepareRichMarkdown(`${pendingQuestion.question}\n\n**Selected:** ${escapeMarkdown(selectedAnswer)}`) },
+    }, () => telegramCall(state.secret, "editMessageText", {
+      ...edited,
       text: `${pendingQuestion.question}\n\nSelected: ${selectedAnswer}`,
       link_preview_options: { is_disabled: true },
-    }).catch(() => {});
+    })).catch(() => {});
     const topic = state.topics.get(pendingQuestion.sessionId);
     if (topic) await (options.syncTopicDashboard || syncTopicDashboard)(state, topic, { phase: "Answer sent", detail: String(selectedAnswer) })
       .then(() => (options.queuePersist || queuePersist)(state)).catch(() => {});
@@ -603,11 +607,28 @@ async function handleCallbackQuery(state, query, options = {}) {
   });
 }
 
+// The native stop button under a streaming draft. Only the draft currently streaming in
+// that topic counts, so a late tap on an old draft cannot stop the next turn.
+async function handleGenerationStopped(state, stopped) {
+  if (stopped?.chat?.id !== state.secret.chatId) return;
+  const topic = topicByThread(state, stopped.message_thread_id);
+  if (!topic || state.activeDrafts?.get(topic.sessionId) !== stopped.draft_id) return;
+  state.activeDrafts.delete(topic.sessionId);
+  const sent = sendSessionControl(state, topic.sessionId, "stop");
+  await updateDashboard(state, topic, {
+    phase: sent ? "Stop requested" : "Disconnected",
+    detail: sent ? "Stopping the active Pi turn" : "Pi session is not connected",
+  });
+}
+
 async function processTelegramUpdate(state, update, options = {}) {
   if (!Number.isSafeInteger(update?.update_id)) return false;
   try {
     if (update.message) await (options.handleTelegramMessage || handleTelegramMessage)(state, update.message);
     if (update.callback_query) await (options.handleCallbackQuery || handleCallbackQuery)(state, update.callback_query);
+    if (update.stopped_message_generation) {
+      await (options.handleGenerationStopped || handleGenerationStopped)(state, update.stopped_message_generation);
+    }
   } catch (error) {
     // Retry transient failures, but never let one update block polling forever.
     if (state.failedUpdate?.id !== update.update_id) state.failedUpdate = { id: update.update_id, attempts: 0 };
@@ -628,7 +649,7 @@ async function pollTelegram(state) {
       const updates = await telegramCall(state.secret, "getUpdates", {
         offset: state.offset,
         timeout: 25,
-        allowed_updates: ["message", "callback_query"],
+        allowed_updates: ["message", "callback_query", "stopped_message_generation"],
       }, 35_000, controller.signal);
       for (const update of updates) await processTelegramUpdate(state, update);
     } catch (error) {
@@ -657,6 +678,7 @@ module.exports = Object.freeze({
     findReplyTarget,
     handleCallbackQuery,
     handleControlMessage,
+    handleGenerationStopped,
     launchWakeSession,
     processTelegramUpdate,
     restoreSessionTopic,

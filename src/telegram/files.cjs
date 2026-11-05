@@ -135,12 +135,19 @@ const MAX_RICH_MEDIA_FILES = 10;
 // Uploads local Markdown images (`![alt](./chart.png)`) inside the session cwd with a rich
 // message. Returns the rewritten Markdown, its media list and the files to attach. Other
 // local images become their caption, since Telegram would reject the whole message.
-async function richLocalMedia(topic, markdown) {
+// `uploaded` maps a url to the file_id Telegram returned for it in an earlier piece of the
+// same reply, so a long reply that shows one chart twice uploads it once.
+async function richLocalMedia(topic, markdown, uploaded = new Map()) {
   const urls = new Set();
   mapImages(markdown, (_alt, url) => { if (!isRemoteUrl(url)) urls.add(url); });
   const found = new Map();
   for (const url of urls) {
     if (found.size >= MAX_RICH_MEDIA_FILES) break;
+    const known = uploaded.get(url);
+    if (known) {
+      found.set(url, { ...known, id: `m${found.size}` });
+      continue;
+    }
     let requested = url;
     try {
       requested = /^file:/i.test(url) ? fileURLToPath(url) : decodeURI(url);
@@ -152,14 +159,35 @@ async function richLocalMedia(topic, markdown) {
     if (read && kind.pattern.test(read.file)) found.set(url, { ...read, id: `m${found.size}`, type: kind.type, link: kind.link });
   }
   const media = [...found.values()];
+  const order = [];
   return {
     markdown: mapImages(markdown, (alt, url, title) => {
       if (isRemoteUrl(url)) return undefined;
       const item = found.get(url);
-      return item ? `![${alt}](tg://${item.link}?id=${item.id}${title})` : localImageText(alt, url);
+      if (!item) return localImageText(alt, url);
+      order.push(url);
+      return `![${alt}](tg://${item.link}?id=${item.id}${title})`;
     }),
-    media: media.map((item) => ({ id: item.id, media: { type: item.type, media: `attach://${item.id}` } })),
-    files: media.map((item) => ({ field: item.id, data: item.data, name: path.basename(item.file) })),
+    media: media.map((item) => ({ id: item.id, media: { type: item.type, media: item.fileId || `attach://${item.id}` } })),
+    files: media.filter((item) => !item.fileId).map((item) => ({ field: item.id, data: item.data, name: path.basename(item.file) })),
+    // Records the file_ids of a sent piece. Media blocks come back in document order; when
+    // their count differs from our references (a nested or dropped block) nothing is cached.
+    remember(sent) {
+      const fileIds = [];
+      const walk = (value) => {
+        if (Array.isArray(value)) return value.forEach(walk);
+        if (!value || typeof value !== "object") return;
+        const file = Array.isArray(value.photo) ? value.photo[value.photo.length - 1] : value[value.type];
+        if (["photo", "animation", "video", "audio", "voice_note"].includes(value.type) && file?.file_id) fileIds.push(file.file_id);
+        for (const key of ["blocks", "items", "cells"]) if (value[key]) walk(value[key]);
+      };
+      walk(sent?.rich_message?.blocks);
+      if (fileIds.length !== order.length) return;
+      order.forEach((url, index) => {
+        const item = found.get(url);
+        uploaded.set(url, { type: item.type, link: item.link, fileId: fileIds[index] });
+      });
+    },
   };
 }
 

@@ -19,7 +19,7 @@ const { dashboardKeyboard, sendTopicChatAction, updateDashboard } = require("../
 const { questionKeyboard } = require("../telegram/questions.cjs");
 const { AGENT_DIR } = require("../shared/paths.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
-const { telegramCall, telegramFormattedCall, telegramRichCall } = require("../telegram/api.cjs");
+const { richEnabled, telegramCall, telegramFormattedCall, telegramRichCall } = require("../telegram/api.cjs");
 const {
   deliverPendingForSession,
   deliverPendingReply,
@@ -40,10 +40,14 @@ const STATE_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 async function sendMarkdown(state, topic, markdown, replyMarkup) {
   const target = { chat_id: state.secret.chatId, message_thread_id: topic.threadId };
   const pieces = splitMarkdown(markdown, RICH_SOURCE_CHARS);
+  const uploaded = new Map();
   let sent;
   for (let index = 0; index < pieces.length; index += 1) {
     const extra = replyMarkup && index === pieces.length - 1 ? { reply_markup: replyMarkup } : {};
-    const local = await richLocalMedia(topic, pieces[index]);
+    // Legacy messages cannot carry inline media, so do not read the files at all then.
+    const local = richEnabled()
+      ? await richLocalMedia(topic, pieces[index], uploaded)
+      : { markdown: pieces[index], media: [], files: [], remember() {} };
     sent = await telegramRichCall(state.secret, "sendRichMessage", {
       ...target,
       rich_message: { markdown: prepareRichMarkdown(local.markdown), ...(local.media.length ? { media: local.media } : {}) },
@@ -62,6 +66,7 @@ async function sendMarkdown(state, topic, markdown, replyMarkup) {
       }
       return result;
     }, local.files);
+    local.remember(sent);
   }
   return sent;
 }
@@ -119,7 +124,16 @@ function handleStreamRequest(state, client, message) {
           const detail = tail.split("\n").find((line) => line.trim() && !/^\s*```/.test(line)) || "";
           updateDashboard(state, topic, { phase: "Working", detail });
         }
-        const target = { chat_id: state.secret.chatId, message_thread_id: topic.threadId, draft_id: message.draftId };
+        // can_stop shows Telegram's own stop button; the router maps the tap to a Pi stop.
+        // keep_on_stop leaves the partial draft visible until the final reply replaces it.
+        const target = {
+          chat_id: state.secret.chatId,
+          message_thread_id: topic.threadId,
+          draft_id: message.draftId,
+          can_stop: true,
+          keep_on_stop: true,
+        };
+        state.activeDrafts.set(client.sessionId, message.draftId);
         await telegramRichCall(state.secret, "sendRichMessageDraft", {
           ...target,
           rich_message: { markdown: message.status ? richThinking(preview) : prepareRichDraft(preview) },
@@ -135,6 +149,7 @@ function handleStreamRequest(state, client, message) {
         return;
       }
       if (message.type === "streamFinal") {
+        if (state.activeDrafts.get(client.sessionId) === message.draftId) state.activeDrafts.delete(client.sessionId);
         if (text.trim()) await sendMarkdown(state, topic, text);
         updateDashboard(state, topic, { phase: "Ready", detail: "Waiting for input" });
       }
@@ -290,12 +305,8 @@ function handleQuestion(state, client, message) {
   }
   const questionId = randomUUID();
   trackTask(state, withTopicRetry(state, client.sessionId, client.cwd, client.sessionName, async (topic) => {
-    const sent = await telegramCall(state.secret, "sendMessage", {
-      chat_id: state.secret.chatId,
-      message_thread_id: topic.threadId,
-      text: String(message.question || "Pi needs your input").slice(0, 3000),
-      reply_markup: questionKeyboard(questionId, options),
-    });
+    // Questions often quote code or compare options in a table, so they get rich formatting too.
+    const sent = await sendMarkdown(state, topic, String(message.question || "Pi needs your input").slice(0, 3000), questionKeyboard(questionId, options));
     state.pendingQuestions.set(questionId, {
       questionId,
       requestId: message.requestId,
@@ -448,6 +459,8 @@ async function startLocalLeader(secret) {
     streamQueues: new Map(),
     dashboardQueues: new Map(),
     chatActionSentAt: new Map(),
+    // Latest streaming draft per session, for Telegram's native stop button.
+    activeDrafts: new Map(),
     activeTasks: new Set(),
     clients: new Map(),
     clientsBySession: new Map(),

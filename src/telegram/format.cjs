@@ -103,8 +103,15 @@ function renderCodeBlock(language, lines) {
   return `<pre><code${className}>${escapeHtml(lines.join("\n"))}</code></pre>`;
 }
 
+// Legacy HTML has no inline media: web images become links, everything else its caption.
+function legacyImages(markdown) {
+  return mapImages(markdown, (alt, url) => (/^https?:/i.test(url)
+    ? `[${alt || url.split(/[\\/?#]/).filter(Boolean).pop() || "image"}](${url})`
+    : localImageText(alt, url)));
+}
+
 function renderTelegramHtml(markdown) {
-  const lines = String(markdown ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const lines = legacyImages(markdown).split("\n");
   const output = [];
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -162,11 +169,13 @@ function renderTelegramHtml(markdown) {
   return output.join("\n").trim();
 }
 
-// Escapes text for Markdown. Telegram's rich parser ignores `\<` and `\&`, so those
-// become entities, which the legacy renderer decodes as well.
+// Escapes text for Markdown. Telegram's rich parser honors a backslash only before the
+// characters below (verified against the live API); before others, such as `:` or `/`,
+// the backslash stays visible. `<` and `&` become entities, which the legacy renderer
+// decodes as well.
 function escapeMarkdown(value) {
   const entities = { "<": "&lt;", "&": "&amp;" };
-  return String(value ?? "").replace(/[!-/:-@[-`{-~]/g, (character) => entities[character] ?? `\\${character}`);
+  return String(value ?? "").replace(/[!#$()*+\-.=>[\]_`{|}~\\<&]/g, (character) => entities[character] ?? `\\${character}`);
 }
 
 // Calls fn on every stretch of text outside fenced code blocks and code spans, in order.

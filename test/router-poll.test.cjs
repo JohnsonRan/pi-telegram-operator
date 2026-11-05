@@ -46,3 +46,22 @@ test("long All Topics commands run without blocking the poll loop", async (t) =>
   assert.equal(state.activeTasks.size, 0);
   assert.ok(sent.some((call) => call.method === "sendMessage" && /Pi update completed/.test(call.body.text)));
 });
+
+test("Telegram's native stop button stops only the draft streaming in that topic", async (t) => {
+  t.mock.method(global, "fetch", async () => new Response(JSON.stringify({ ok: true, result: true })));
+  const lines = [];
+  const socket = { destroyed: false, writable: true, write: (line) => { lines.push(JSON.parse(line)); return true; } };
+  const topic = { sessionId: "s1", threadId: 7, cwd: "." };
+  const state = {
+    secret: { botToken: "token", chatId: 42, allowedUserId: 42 },
+    topics: new Map([["s1", topic]]),
+    activeDrafts: new Map([["s1", 99]]),
+    clientsBySession: new Map([["s1", { registered: true, sessionId: "s1", socket }]]),
+  };
+  await router.handleGenerationStopped(state, { chat: { id: 42 }, message_thread_id: 7, draft_id: 98 });
+  await router.handleGenerationStopped(state, { chat: { id: 1 }, message_thread_id: 7, draft_id: 99 });
+  assert.equal(lines.length, 0);
+  await router.handleGenerationStopped(state, { chat: { id: 42 }, message_thread_id: 7, draft_id: 99 });
+  assert.deepEqual(lines.map((line) => [line.type, line.action]), [["control", "stop"]]);
+  assert.equal(state.activeDrafts.has("s1"), false);
+});

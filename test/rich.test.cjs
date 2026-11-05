@@ -84,7 +84,45 @@ test("uploads local images inside the session cwd and leaves other paths alone",
       { id: "m1", media: { type: "video", media: "attach://m1" } },
     ]);
     assert.deepEqual(result.files.map((file) => [file.field, file.name, String(file.data)]), [["m0", "chart.png", "png"], ["m1", "clip.mp4", "mp4"]]);
+
+    // A later piece reuses the file_ids Telegram returned instead of uploading again.
+    const uploaded = new Map();
+    const first = await richLocalMedia({ cwd }, "![a](chart.png) ![b](./clip.mp4)", uploaded);
+    first.remember({ rich_message: { blocks: [
+      { type: "paragraph", text: "x" },
+      { type: "photo", photo: [{ file_id: "small" }, { file_id: "PHOTO" }] },
+      { type: "details", blocks: [{ type: "video", video: { file_id: "VIDEO" } }] },
+    ] } });
+    const second = await richLocalMedia({ cwd }, "![again](chart.png)", uploaded);
+    assert.deepEqual(second.media, [{ id: "m0", media: { type: "photo", media: "PHOTO" } }]);
+    assert.equal(second.files.length, 0);
+    // A response that does not line up with our references caches nothing.
+    const other = new Map();
+    (await richLocalMedia({ cwd }, "![a](chart.png)", other)).remember({ rich_message: { blocks: [] } });
+    assert.equal(other.size, 0);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test("the thinking preview keeps the last reasoning lines only", () => {
+  const { thinkingTail } = require("../src/session/live-status.cjs");
+  const message = {
+    role: "assistant",
+    content: [
+      { type: "thinking", thinking: Array.from({ length: 9 }, (_, index) => `step ${index + 1}`).join("\n") },
+      { type: "text", text: "not reasoning" },
+    ],
+  };
+  assert.equal(thinkingTail(message), "step 4\nstep 5\nstep 6\nstep 7\nstep 8\nstep 9");
+  assert.equal(thinkingTail({ role: "assistant", content: [{ type: "thinking", thinking: "x".repeat(700) }] }).length, 601);
+  assert.equal(thinkingTail({ role: "user", content: [] }), "");
+});
+
+test("the legacy renderer shows images as links or captions instead of raw syntax", () => {
+  const { renderTelegramHtml } = require("../src/telegram/format.cjs");
+  assert.equal(
+    renderTelegramHtml('![chart](./out/chart.png) ![](https://x.dev/a.png "t") ![](/tmp/shot.png)\n`![keep](x.png)`'),
+    '<i>chart</i> <a href="https://x.dev/a.png">a.png</a> <i>shot.png</i>\n<code>![keep](x.png)</code>',
+  );
 });

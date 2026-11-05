@@ -33,6 +33,7 @@ function isValidApiBaseUrl(value) {
 const OPERATIONAL_CONFIG_VALIDATORS = Object.freeze({
   port: (value) => Number.isInteger(value) && value >= 1024 && value <= 65535,
   linkPreview: (value) => typeof value === "boolean",
+  thinkingPreview: (value) => typeof value === "boolean",
   apiBaseUrl: isValidApiBaseUrl,
   wakeMode: (value) => typeof value === "boolean",
   wakeDefaultCwd: (value) => typeof value === "string",
@@ -68,6 +69,7 @@ function validateSettings(botTokenValue, raw) {
   const port = raw.port === undefined ? DEFAULT_PORT : asInteger(raw.port, "port");
   if (port < 1024 || port > 65535) throw new Error("port must be between 1024 and 65535");
   const linkPreview = raw.linkPreview === true;
+  const thinkingPreview = raw.thinkingPreview === true;
   const apiBaseUrl = normalizeApiBaseUrl(raw.apiBaseUrl);
   const wakeMode = raw.wakeMode === true;
   const wakeDefaultCwd = String(raw.wakeDefaultCwd || "").trim();
@@ -90,6 +92,7 @@ function validateSettings(botTokenValue, raw) {
     bridgeSecret,
     port,
     linkPreview,
+    thinkingPreview,
     apiBaseUrl,
     wakeMode,
     wakeDefaultCwd,

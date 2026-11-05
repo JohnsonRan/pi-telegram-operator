@@ -1,7 +1,7 @@
 const { randomInt } = require("node:crypto");
 const { connectClient, getClientState, initializeState, requestBroker } = require("../bridge/client.cjs");
 const { sendLine } = require("../bridge/protocol.cjs");
-const { assistantText, formatLiveStatus } = require("./live-status.cjs");
+const { assistantText, formatLiveStatus, thinkingTail } = require("./live-status.cjs");
 const { warn } = require("../shared/errors.cjs");
 
 const STREAM_THROTTLE_MS = 1_200;
@@ -9,7 +9,14 @@ const STATUS_HEARTBEAT_MS = 5_000;
 const attachedApis = new WeakSet();
 
 function streamDraftText(stream) {
-  return stream.text.trim() ? stream.text : stream.statusText || "Main agent · Running";
+  if (stream.text.trim()) return stream.text;
+  const status = stream.statusText || "Main agent · Running";
+  return stream.thinking ? `${status}\n\n${stream.thinking}` : status;
+}
+
+// Reasoning goes into the status block only when the user opted in with thinkingPreview.
+function captureThinking(state, stream, message) {
+  stream.thinking = state.secret?.thinkingPreview ? thinkingTail(message) : "";
 }
 
 async function sendStream(state, type, stream) {
@@ -41,6 +48,7 @@ function ensureStatusStream(state) {
     state.currentStream = {
       draftId: randomInt(1, 2_147_483_647),
       text: "",
+      thinking: "",
       statusText: "",
       lastSent: undefined,
       timer: undefined,
@@ -140,6 +148,7 @@ function attach(pi) {
     if (!state?.secret || state.closed) return;
     const stream = ensureStatusStream(state);
     stream.text = assistantText(event.message);
+    captureThinking(state, stream, event.message);
     const text = streamDraftText(stream);
     stream.lastSent = text;
     sendStream(state, "streamDraft", stream).catch(warn("Cannot start stream"));
@@ -150,6 +159,7 @@ function attach(pi) {
     const stream = state?.currentStream;
     if (!stream || event.message?.role !== "assistant") return;
     stream.text = assistantText(event.message);
+    captureThinking(state, stream, event.message);
     scheduleStreamDraft(state);
   });
 

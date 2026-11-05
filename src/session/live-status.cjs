@@ -6,6 +6,17 @@ function assistantText(message) {
     .join("\n");
 }
 
+// The end of the model's visible reasoning, for the optional thinking preview.
+function thinkingTail(message, maxLines = 6, maxChars = 600) {
+  if (message?.role !== "assistant" || !Array.isArray(message.content)) return "";
+  const text = message.content
+    .filter((item) => item?.type === "thinking" && typeof item.thinking === "string")
+    .map((item) => item.thinking)
+    .join("\n");
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean).slice(-maxLines).join("\n");
+  return lines.length > maxChars ? `…${lines.slice(-maxChars)}` : lines;
+}
+
 function oneLine(value, limit = 120) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   return text.length > limit ? `${text.slice(0, Math.max(1, limit - 1))}…` : text;
@@ -67,4 +78,4 @@ function formatLiveStatus(activity, now = Date.now()) {
   return `${heading}\n${activity.phase || "Thinking"}`;
 }
 
-module.exports = Object.freeze({ assistantText, formatLiveStatus, subagentProgress, summarizeToolArgs });
+module.exports = Object.freeze({ assistantText, formatLiveStatus, subagentProgress, summarizeToolArgs, thinkingTail });
