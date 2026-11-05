@@ -78,6 +78,15 @@ export default function telegraPi(pi: ExtensionAPI): void {
     label: "Send file to Telegram",
     description: "Send a file or image from the current working directory to this Pi session's private Telegram topic.",
     promptSnippet: "Send a generated file or image to the user's Telegram topic.",
+    // Replies are mirrored to Telegram as rich messages; without this the model never uses
+    // the Telegram-only parts. Kept short and opt-in, since the terminal shows raw markup.
+    promptGuidelines: [
+      "Your replies are also shown in the user's Telegram topic, which renders GitHub-flavored Markdown natively (tables, task lists, footnotes, $math$). Plain Markdown reads well in both the terminal and Telegram, so prefer it.",
+      "Wrap long logs, diffs or command output the user may not need to read in <details><summary>Short title</summary>, a blank line, the content, then </details>; Telegram shows it collapsed.",
+      "To show an image, chart or short video you generated inside the working directory as part of a reply, embed it with ![caption](./path.png); it is uploaded inline. Use telegram_send_file for other files or to send a file on its own.",
+      "When a reply ends with a link the user will likely open (pull request, CI run, deployment) or a value to copy, you may add <tg-button-row><tg-button type=\"url\" url=\"https://...\">Open PR</tg-button></tg-button-row>; type=\"copy_text\" text=\"...\" also works. Other button types are disabled.",
+      "Use Telegram extras such as ==highlight==, ||spoiler||, <u> or <sup> sparingly and only when they help; the terminal shows them as raw markup.",
+    ],
     parameters: Type.Object({
       path: Type.String({ minLength: 1, description: "File path inside the current session working directory" }),
       caption: Type.Optional(Type.String({ description: "Optional Telegram caption" })),
