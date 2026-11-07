@@ -103,13 +103,20 @@ let betaMissing = false;
 let betaFailures = 0;
 let betaPausedUntil = 0;
 
-async function telegramBetaCall(secret, method, payload, timeoutMs, externalSignal) {
+// `result.viaBeta` tells the caller which endpoint actually answered. /beta keeps its own
+// getUpdates queue with its own update_id range, so an offset from one endpoint is meaningless
+// to the other; the poller must not carry one across.
+// /beta keeps its own getUpdates queue with its own update_id range, so an offset from one
+// endpoint is meaningless to the other. The poller needs to know which one answered, and to
+// build a different payload for each (each queue has its own offset).
+async function telegramBetaCallRouted(secret, method, payload, timeoutMs, externalSignal) {
+  const body = (viaBeta) => (typeof payload === "function" ? payload(viaBeta) : payload);
   const official = (secret.apiBaseUrl || DEFAULT_API_BASE_URL) === DEFAULT_API_BASE_URL;
   if (official && !betaMissing && Date.now() >= betaPausedUntil) {
     try {
-      const result = await telegramCall({ ...secret, apiBaseUrl: `${DEFAULT_API_BASE_URL}/beta` }, method, payload, timeoutMs, externalSignal);
+      const result = await telegramCall({ ...secret, apiBaseUrl: `${DEFAULT_API_BASE_URL}/beta` }, method, body(true), timeoutMs, externalSignal);
       betaFailures = 0;
-      return result;
+      return { result, viaBeta: true };
     } catch (error) {
       if (error.status === 404) betaMissing = true;
       // Any other 4xx is a real answer (bad parameters, flood control), not a broken endpoint.
@@ -121,7 +128,11 @@ async function telegramBetaCall(secret, method, payload, timeoutMs, externalSign
       }
     }
   }
-  return telegramCall(secret, method, payload, timeoutMs, externalSignal);
+  return { result: await telegramCall(secret, method, body(false), timeoutMs, externalSignal), viaBeta: false };
 }
 
-module.exports = Object.freeze({ DEFAULT_API_BASE_URL, richEnabled, telegramBetaCall, telegramCall, telegramFormattedCall, telegramRichCall, telegramMultipartCall, telegramUrl });
+async function telegramBetaCall(secret, method, payload, timeoutMs, externalSignal) {
+  return (await telegramBetaCallRouted(secret, method, payload, timeoutMs, externalSignal)).result;
+}
+
+module.exports = Object.freeze({ DEFAULT_API_BASE_URL, richEnabled, telegramBetaCall, telegramBetaCallRouted, telegramCall, telegramFormattedCall, telegramRichCall, telegramMultipartCall, telegramUrl });

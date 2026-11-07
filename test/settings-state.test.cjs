@@ -65,6 +65,7 @@ test("persists and reads only the canonical broker state", async () => {
   try {
     const state = {
       offset: 12,
+      offsets: { plain: 12, beta: 900 },
       mappings: new Map(),
       pendingReplies: new Map(),
       pendingQuestions: new Map(),
@@ -74,6 +75,20 @@ test("persists and reads only the canonical broker state", async () => {
     assert.deepEqual(await readdir(paths.directory), ["pi-telegram-operator.state.json"]);
     const stored = await readBrokerState(paths.statePath);
     assert.equal(stored.offset, 12);
+    assert.deepEqual(stored.offsets, { plain: 12, beta: 900 });
+  } finally {
+    await rm(paths.directory, { recursive: true, force: true });
+  }
+});
+
+test("migrates a legacy single offset to the plain queue, not to beta", async () => {
+  const paths = await temporaryPaths();
+  try {
+    // Written by a version that polled only one queue with one offset.
+    await writeFile(paths.statePath, JSON.stringify({ offset: 514084770, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] }));
+    const stored = await readBrokerState(paths.statePath);
+    assert.equal(stored.offsets.plain, 514084770);
+    assert.equal(stored.offsets.beta, undefined);
   } finally {
     await rm(paths.directory, { recursive: true, force: true });
   }

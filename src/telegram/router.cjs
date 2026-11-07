@@ -10,7 +10,7 @@ const { parseQuestionCallback } = require("./questions.cjs");
 const { cloneRepository, parseGitCloneCommand } = require("./git-clone.cjs");
 const { parsePiUpdateCommand, runPiUpdate } = require("./pi-update.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
-const { telegramBetaCall, telegramCall, telegramRichCall } = require("./api.cjs");
+const { telegramBetaCall, telegramBetaCallRouted, telegramCall, telegramRichCall } = require("./api.cjs");
 const { escapeMarkdown, prepareRichMarkdown } = require("./format.cjs");
 const { parseControlCommand, resolveWakeCwd } = require("../wake/launcher.cjs");
 
@@ -18,6 +18,32 @@ const WAKE_REGISTRATION_TIMEOUT_MS = 15_000;
 const WAKE_STOP_TIMEOUT_MS = 5_000;
 const WAKE_STABILITY_TIMEOUT_MS = 1_500;
 const MAX_UPDATE_ATTEMPTS = 3;
+
+// /beta serves its own getUpdates queue whose update_id range is unrelated to the plain API's.
+// Each queue therefore needs its own offset: sharing one makes every poll either replay the
+// queue's whole backlog or skip it entirely.
+const PLAIN_QUEUE = "plain";
+const BETA_QUEUE = "beta";
+const queueKey = (viaBeta) => (viaBeta ? BETA_QUEUE : PLAIN_QUEUE);
+
+function knownOffset(state, key) {
+  const stored = state.offsets?.[key];
+  return Number.isSafeInteger(stored) && stored >= 0 ? stored : undefined;
+}
+
+// A queue with no recorded offset is new (first run, or /beta came back after the plain queue
+// was in use). Starting it at 0 would replay that queue's whole backlog with dead confirmations,
+// and replaying is what produced an answer-widget-query warning every second. Prime with offset
+// -1 instead: Telegram forgets the backlog and answers with only the newest update.
+function pollPayload(state, beta) {
+  const known = knownOffset(state, queueKey(beta));
+  return {
+    offset: known ?? -1,
+    limit: known === undefined ? 1 : 100,
+    timeout: 25,
+    allowed_updates: ["message", "callback_query", "stopped_message_generation", "widget_query"],
+  };
+}
 
 async function ensureTopic(state, sessionId, cwd, sessionName) {
   const existing = state.topics.get(sessionId);
@@ -642,6 +668,7 @@ async function handleGenerationStopped(state, stopped) {
 
 async function processTelegramUpdate(state, update, options = {}) {
   if (!Number.isSafeInteger(update?.update_id)) return false;
+  const key = options.queue === BETA_QUEUE ? BETA_QUEUE : PLAIN_QUEUE;
   try {
     if (update.message) await (options.handleTelegramMessage || handleTelegramMessage)(state, update.message);
     if (update.callback_query) await (options.handleCallbackQuery || handleCallbackQuery)(state, update.callback_query);
@@ -656,7 +683,10 @@ async function processTelegramUpdate(state, update, options = {}) {
     warn(`Skipping Telegram update ${update.update_id} after ${MAX_UPDATE_ATTEMPTS} failures`)(error);
   }
   state.failedUpdate = undefined;
-  state.offset = Math.max(state.offset, update.update_id + 1);
+  state.offsets = state.offsets || {};
+  state.offsets[key] = Math.max(knownOffset(state, key) ?? update.update_id + 1, update.update_id + 1);
+  // `offset` mirrors the plain queue for state written by older versions.
+  if (key === PLAIN_QUEUE) state.offset = state.offsets[key];
   await (options.queuePersist || queuePersist)(state);
   return true;
 }
@@ -666,12 +696,24 @@ async function pollTelegram(state) {
     const controller = new AbortController();
     state.pollController = controller;
     try {
-      const updates = await telegramBetaCall(state.secret, "getUpdates", {
-        offset: state.offset,
-        timeout: 25,
-        allowed_updates: ["message", "callback_query", "stopped_message_generation", "widget_query"],
-      }, 35_000, controller.signal);
-      for (const update of updates) await processTelegramUpdate(state, update);
+      // Queue-specific offsets: an update_id from /beta means nothing to the plain API.
+      const priming = {
+        [PLAIN_QUEUE]: knownOffset(state, PLAIN_QUEUE) === undefined,
+        [BETA_QUEUE]: knownOffset(state, BETA_QUEUE) === undefined,
+      };
+      const { result: updates, viaBeta } = await telegramBetaCallRouted(state.secret, "getUpdates", (beta) => pollPayload(state, beta), 35_000, controller.signal);
+      const queue = queueKey(viaBeta);
+      if (priming[queue]) {
+        // This poll only established where the new queue starts; delivering what it carries would
+        // replay old messages whose confirmations have expired.
+        const newest = updates.length ? updates[updates.length - 1].update_id + 1 : 0;
+        state.offsets = state.offsets || {};
+        state.offsets[queue] = Math.max(knownOffset(state, queue) ?? newest, newest);
+        if (queue === PLAIN_QUEUE) state.offset = state.offsets[queue];
+        await queuePersist(state);
+        continue;
+      }
+      for (const update of updates) await processTelegramUpdate(state, update, { queue });
     } catch (error) {
       if (!state.closed) {
         warn("Poll failed")(error);
@@ -702,6 +744,7 @@ module.exports = Object.freeze({
     handleWidgetQuery,
     launchWakeSession,
     processTelegramUpdate,
+    pollPayload,
     restoreSessionTopic,
     waitForWakeRegistration,
     waitForWakeStability,
