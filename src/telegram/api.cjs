@@ -1,4 +1,4 @@
-const { errorMessage } = require("../shared/errors.cjs");
+const { errorMessage, warn } = require("../shared/errors.cjs");
 
 const DEFAULT_API_BASE_URL = "https://api.telegram.org";
 
@@ -94,16 +94,31 @@ async function telegramRichCall(secret, method, payload, legacy, files = []) {
 const richEnabled = () => !richUnsupported;
 
 // Bot API 10.4 widgets (sendWidget, widget_query updates) are served only under Telegram's /beta
-// path for now. Self-hosted servers keep their own URL; once /beta goes away we fall back to it.
+// path for now. Self-hosted servers keep their own URL. Polling goes through here too, so a
+// broken /beta must not cut off ordinary messages: a 404 drops it for good, and repeated
+// network or 5xx failures pause it for a while.
+const BETA_MAX_FAILURES = 3;
+const BETA_PAUSE_MS = 10 * 60_000;
 let betaMissing = false;
+let betaFailures = 0;
+let betaPausedUntil = 0;
 
 async function telegramBetaCall(secret, method, payload, timeoutMs, externalSignal) {
-  if (!betaMissing && (secret.apiBaseUrl || DEFAULT_API_BASE_URL) === DEFAULT_API_BASE_URL) {
+  const official = (secret.apiBaseUrl || DEFAULT_API_BASE_URL) === DEFAULT_API_BASE_URL;
+  if (official && !betaMissing && Date.now() >= betaPausedUntil) {
     try {
-      return await telegramCall({ ...secret, apiBaseUrl: `${DEFAULT_API_BASE_URL}/beta` }, method, payload, timeoutMs, externalSignal);
+      const result = await telegramCall({ ...secret, apiBaseUrl: `${DEFAULT_API_BASE_URL}/beta` }, method, payload, timeoutMs, externalSignal);
+      betaFailures = 0;
+      return result;
     } catch (error) {
-      if (error.status !== 404) throw error;
-      betaMissing = true;
+      if (error.status === 404) betaMissing = true;
+      // Any other 4xx is a real answer (bad parameters, flood control), not a broken endpoint.
+      else if (error.status < 500 || ++betaFailures < BETA_MAX_FAILURES) throw error;
+      else {
+        betaFailures = 0;
+        betaPausedUntil = Date.now() + BETA_PAUSE_MS;
+        warn("Telegram /beta keeps failing; using the plain Bot API URL for 10 minutes")(error);
+      }
     }
   }
   return telegramCall(secret, method, payload, timeoutMs, externalSignal);

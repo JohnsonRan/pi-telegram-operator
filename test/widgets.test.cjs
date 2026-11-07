@@ -57,6 +57,27 @@ test("a widget tap is answered at once and delivered to the topic's session", as
   assert.equal(calls.filter((call) => call.url.endsWith("/answerWidgetQuery")).length, 3);
 });
 
+test("repeated /beta failures pause it, then it is tried again", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  // Fake time from 0, so the pause is long over once real time is back for the next test.
+  t.mock.timers.enable({ apis: ["Date"], now: 0 });
+  const calls = mockFetch(t, (_index, url) => (url.includes("/beta/") ? { ok: false, error_code: 502, description: "Bad Gateway" } : { ok: true, result: [] }));
+  const secret = { botToken: token, apiBaseUrl: "https://api.telegram.org" };
+  await assert.rejects(telegramBetaCall(secret, "getUpdates", {}), /Bad Gateway/);
+  await assert.rejects(telegramBetaCall(secret, "getUpdates", {}), /Bad Gateway/);
+  await telegramBetaCall(secret, "getUpdates", {});
+  await telegramBetaCall(secret, "getUpdates", {});
+  t.mock.timers.tick(10 * 60_000);
+  await assert.rejects(telegramBetaCall(secret, "getUpdates", {}), /Bad Gateway/);
+  assert.deepEqual(calls.map((call) => call.url.includes("/beta/")), [true, true, true, false, false, true]);
+});
+
+test("a 4xx from /beta is thrown without falling back", async (t) => {
+  const calls = mockFetch(t, () => ({ ok: false, error_code: 400, description: "Bad Request: parameter \"html\" is required" }));
+  await assert.rejects(telegramBetaCall({ botToken: token, apiBaseUrl: "https://api.telegram.org" }, "sendWidget", {}), /html/);
+  assert.equal(calls.length, 1);
+});
+
 // Last: the fallback flips a module-level flag for the rest of this process.
 test("falls back to the plain URL when /beta is gone", async (t) => {
   const calls = mockFetch(t, (index) => (index === 1 ? { ok: false, error_code: 404, description: "Not Found" } : { ok: true, result: [] }));
