@@ -8,7 +8,7 @@
  */
 
 const { deflateSync } = require("node:zlib");
-const { initializeState, requestArtifact, requestNotification, requestQuestion, requestWidget, requestWidgetData } = require("./bridge/client.cjs");
+const { initializeState, requestArtifact, requestNotification, requestQuestion, requestWidget, requestWidgetData, requestWidgetQuestion } = require("./bridge/client.cjs");
 const { closeLeader, startLocalLeader } = require("./broker/server.cjs");
 const { readSettings: readSecret } = require("./shared/settings.cjs");
 const { attach } = require("./session/streaming.cjs");
@@ -47,6 +47,16 @@ async function updateWidget(pi, ctx, messageId, data) {
   await requestWidgetData(await initializeState(pi, ctx), messageId, data);
 }
 
+// A widget question without a widget of its own keeps the plain question, so callers can always
+// pass widget through and only the broker and the client decide what the user sees.
+async function askWidgetQuestion(pi, ctx, question, options, widget, signal) {
+  const html = String(widget || "").trim();
+  if (!html) return askQuestion(pi, ctx, question, options, signal);
+  checkWidgetSize(html);
+  const result = await requestWidgetQuestion(await initializeState(pi, ctx), question, options, html, signal);
+  return String(result.answer || "");
+}
+
 async function runWakeDaemon() {
   const secret = await readSecret();
   if (!secret.wakeMode) throw new Error("wakeMode is disabled in pi-telegram-operator.json");
@@ -72,6 +82,7 @@ async function runWakeDaemon() {
 
 module.exports = Object.freeze({
   askQuestion,
+  askWidgetQuestion,
   attach,
   notify,
   runWakeDaemon,

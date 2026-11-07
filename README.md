@@ -70,7 +70,7 @@ Start Pi as usual. The first time a session sends something (a finished answer, 
 
 ### Questions
 
-Pi can use the `telegram_ask_user_question` tool to ask you a question with answer buttons, and it waits for your tap. Questions Pi asks in the terminal (`ask_user_question`) still show up as a notification, but you answer them at the computer.
+Pi can use the `telegram_ask_user_question` tool to ask you a question with answer buttons, and it waits for your tap. With its optional `widget` argument the question is drawn as an interactive widget instead of text, and your options sit as buttons right under it — handy when the answer needs a chart, a diff or a comparison. Questions Pi asks in the terminal (`ask_user_question`) still show up as a notification, but you answer them at the computer.
 
 ### Widgets
 

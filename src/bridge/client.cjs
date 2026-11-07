@@ -393,6 +393,17 @@ function requestQuestion(state, question, options, signal) {
   }, "Telegram question", 24 * 60 * 60 * 1_000, { durable: true, signal });
 }
 
+// Same handshake as a plain question, but the broker asks sendWidget for a widget message with the
+// options as its inline keyboard. Callers pass a widget only once checkWidgetSize() accepted it.
+function requestWidgetQuestion(state, question, options, widget, signal) {
+  return requestBroker(state, {
+    type: "widgetQuestion",
+    question: String(question || "Pi needs your input"),
+    options: Array.isArray(options) ? options.map(String) : [],
+    widget: String(widget || ""),
+  }, "Telegram widget question", 24 * 60 * 60 * 1_000, { durable: true, signal });
+}
+
 function requestWidget(state, widget) {
   return requestBroker(state, { type: "widget", ...widget }, "Telegram widget");
 }
@@ -430,5 +441,6 @@ module.exports = Object.freeze({
   requestQuestion,
   requestWidget,
   requestWidgetData,
+  requestWidgetQuestion,
   __test: Object.freeze({ handleClientMessage, rejectPending, scheduleReconnect }),
 });

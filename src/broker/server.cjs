@@ -16,7 +16,7 @@ const {
 } = require("../telegram/format.cjs");
 const { richLocalMedia, sendSessionArtifact } = require("../telegram/files.cjs");
 const { dashboardKeyboard, sendTopicChatAction, updateDashboard } = require("../telegram/dashboard.cjs");
-const { questionKeyboard } = require("../telegram/questions.cjs");
+const { questionKeyboard, widgetQuestionCaption, widgetQuestionKeyboard } = require("../telegram/questions.cjs");
 const { AGENT_DIR } = require("../shared/paths.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
 const { richEnabled, telegramBetaCall, telegramCall, telegramFormattedCall, telegramRichCall } = require("../telegram/api.cjs");
@@ -329,6 +329,50 @@ function handleQuestion(state, client, message) {
   });
 }
 
+// A question drawn as a widget: the widget carries the question itself and its options sit in the
+// inline keyboard under it (widgetQuestionKeyboard). Both live in the same message, so a tap comes
+// back as the usual question:<id>:<index> callback and takes exactly the same path as an
+// inline-keyboard question, including the replay on reconnect.
+function handleWidgetQuestion(state, client, message) {
+  if (!(client.registered && typeof message.requestId === "string")) return;
+  const options = Array.isArray(message.options) ? message.options.map(String).filter(Boolean).slice(0, 10) : [];
+  const html = typeof message.widget === "string" ? message.widget.trim() : "";
+  if (options.length === 0 || !html) {
+    sendFailure(client, message.requestId, "A widget question needs a widget and selectable options");
+    return;
+  }
+  const questionId = randomUUID();
+  const question = String(message.question || "Pi needs your input").slice(0, 3000);
+  trackTask(state, withTopicRetry(state, client.sessionId, client.cwd, client.sessionName, async (topic) => {
+    const sent = await telegramBetaCall(state.secret, "sendWidget", {
+      chat_id: state.secret.chatId,
+      message_thread_id: topic.threadId,
+      html,
+      caption: widgetQuestionCaption(question, options),
+      allow_queries: true,
+      reply_markup: widgetQuestionKeyboard(questionId, options),
+    });
+    state.pendingQuestions.set(questionId, {
+      questionId,
+      requestId: message.requestId,
+      clientId: client.clientId,
+      sessionId: client.sessionId,
+      threadId: topic.threadId,
+      messageId: sent.message_id,
+      question,
+      options,
+      createdAt: Date.now(),
+    });
+    topic.widgetIds = [...(topic.widgetIds || []), sent.message_id].slice(-MAX_TOPIC_WIDGETS);
+    while (state.pendingQuestions.size > MAX_PENDING_QUESTIONS) state.pendingQuestions.delete(state.pendingQuestions.keys().next().value);
+    await queuePersist(state);
+    updateDashboard(state, topic, { phase: "Waiting for answer", detail: question });
+    return sent;
+  })).catch((error) => {
+    sendFailure(client, message.requestId, error);
+  });
+}
+
 function handleArtifact(state, client, message) {
   if (!(client.registered && typeof message.requestId === "string")) return;
   const topic = state.topics.get(client.sessionId);
@@ -413,6 +457,7 @@ const BROKER_HANDLERS = new Map(Object.entries({
   streamDraft: handleStreamDraft,
   streamFinal: handleStreamFinal,
   question: handleQuestion,
+  widgetQuestion: handleWidgetQuestion,
   artifact: handleArtifact,
   notify: handleNotify,
   widget: handleWidget,
