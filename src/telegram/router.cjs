@@ -31,15 +31,13 @@ function knownOffset(state, key) {
   return Number.isSafeInteger(stored) && stored >= 0 ? stored : undefined;
 }
 
-// A queue with no recorded offset is new (first run, or /beta came back after the plain queue
-// was in use). Starting it at 0 would replay that queue's whole backlog with dead confirmations,
-// and replaying is what produced an answer-widget-query warning every second. Prime with offset
-// -1 instead: Telegram forgets the backlog and answers with only the newest update.
+// A queue with no recorded offset is one this process has never read (first run, or /beta came
+// back after the plain queue was in use). Read it from the start: an unconfirmed update is a
+// message the user never received, and re-delivering is recoverable while dropping is not.
 function pollPayload(state, beta) {
-  const known = knownOffset(state, queueKey(beta));
   return {
-    offset: known ?? -1,
-    limit: known === undefined ? 1 : 100,
+    offset: knownOffset(state, queueKey(beta)) ?? 0,
+    limit: 100,
     timeout: 25,
     allowed_updates: ["message", "callback_query", "stopped_message_generation", "widget_query"],
   };
@@ -697,23 +695,8 @@ async function pollTelegram(state) {
     state.pollController = controller;
     try {
       // Queue-specific offsets: an update_id from /beta means nothing to the plain API.
-      const priming = {
-        [PLAIN_QUEUE]: knownOffset(state, PLAIN_QUEUE) === undefined,
-        [BETA_QUEUE]: knownOffset(state, BETA_QUEUE) === undefined,
-      };
       const { result: updates, viaBeta } = await telegramBetaCallRouted(state.secret, "getUpdates", (beta) => pollPayload(state, beta), 35_000, controller.signal);
-      const queue = queueKey(viaBeta);
-      if (priming[queue]) {
-        // This poll only established where the new queue starts; delivering what it carries would
-        // replay old messages whose confirmations have expired.
-        const newest = updates.length ? updates[updates.length - 1].update_id + 1 : 0;
-        state.offsets = state.offsets || {};
-        state.offsets[queue] = Math.max(knownOffset(state, queue) ?? newest, newest);
-        if (queue === PLAIN_QUEUE) state.offset = state.offsets[queue];
-        await queuePersist(state);
-        continue;
-      }
-      for (const update of updates) await processTelegramUpdate(state, update, { queue });
+      for (const update of updates) await processTelegramUpdate(state, update, { queue: queueKey(viaBeta) });
     } catch (error) {
       if (!state.closed) {
         warn("Poll failed")(error);

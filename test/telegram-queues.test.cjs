@@ -41,22 +41,21 @@ test("each Telegram queue keeps its own offset", async (t) => {
   assert.deepEqual(state.offsets, { plain: 502, beta: 9002 });
 });
 
-test("an unknown queue is primed with -1 instead of replaying its backlog", async (t) => {
+test("an unknown queue is read from its start rather than skipped", async (t) => {
   const calls = mockFetch(t, () => ({ ok: true, result: [] }));
   const state = { offsets: {}, persistQueue: Promise.resolve() };
 
   await telegramBetaCallRouted(secret, "getUpdates", (beta) => router.pollPayload(state, beta), 1_000);
 
-  // /beta answers first, so the priming request goes there.
+  // /beta answers first. An unconfirmed update is a message the user never saw, so a queue this
+  // process has never read starts at 0 and delivers what it finds; dropping is unrecoverable.
   assert.equal(calls[0].url, `https://api.telegram.org/beta/bot${token}/getUpdates`);
-  assert.equal(calls[0].body.offset, -1);
-  assert.equal(calls[0].body.limit, 1);
+  assert.equal(calls[0].body.offset, 0);
 
-  // Once a queue has an offset, polling uses it normally.
+  // Once a queue has an offset, polling uses it.
   state.offsets.beta = 700;
   await telegramBetaCallRouted(secret, "getUpdates", (beta) => router.pollPayload(state, beta), 1_000);
   assert.equal(calls[1].body.offset, 700);
-  assert.equal(calls[1].body.limit, 100);
 });
 
 test("a queue cannot borrow the other queue's offset", async (t) => {
@@ -67,6 +66,6 @@ test("a queue cannot borrow the other queue's offset", async (t) => {
 
   assert.equal(calls[0].body.offset, 700);
   // The plain payload for the same poll must not see beta's 700.
-  assert.equal(router.pollPayload(state, false).offset, -1);
+  assert.equal(router.pollPayload(state, false).offset, 0);
   assert.equal(router.pollPayload(state, true).offset, 700);
 });
