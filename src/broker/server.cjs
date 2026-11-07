@@ -16,7 +16,7 @@ const {
 } = require("../telegram/format.cjs");
 const { richLocalMedia, sendSessionArtifact } = require("../telegram/files.cjs");
 const { dashboardKeyboard, sendTopicChatAction, updateDashboard } = require("../telegram/dashboard.cjs");
-const { questionKeyboard, widgetQuestionCaption, widgetQuestionKeyboard } = require("../telegram/questions.cjs");
+const { questionKeyboard, toggleKeyboard, widgetQuestionCaption, widgetQuestionKeyboard } = require("../telegram/questions.cjs");
 const { AGENT_DIR } = require("../shared/paths.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
 const { richEnabled, telegramBetaCall, telegramCall, telegramFormattedCall, telegramRichCall } = require("../telegram/api.cjs");
@@ -305,10 +305,13 @@ function handleQuestion(state, client, message) {
     sendFailure(client, message.requestId, "Question has no selectable options");
     return;
   }
+  // A multi-select keeps its state on the pending question and only answers on Done.
+  const multiSelect = message.multiSelect === true;
   const questionId = randomUUID();
   trackTask(state, withTopicRetry(state, client.sessionId, client.cwd, client.sessionName, async (topic) => {
     // Questions often quote code or compare options in a table, so they get rich formatting too.
-    const sent = await sendMarkdown(state, topic, String(message.question || "Pi needs your input").slice(0, 3000), questionKeyboard(questionId, options));
+    const keyboard = multiSelect ? toggleKeyboard(questionId, options) : questionKeyboard(questionId, options);
+    const sent = await sendMarkdown(state, topic, String(message.question || "Pi needs your input").slice(0, 3000), keyboard);
     state.pendingQuestions.set(questionId, {
       questionId,
       requestId: message.requestId,
@@ -318,6 +321,7 @@ function handleQuestion(state, client, message) {
       messageId: sent.message_id,
       question: String(message.question || "Pi needs your input").slice(0, 3000),
       options,
+      ...(multiSelect ? { multiSelect: true, selected: [] } : {}),
       createdAt: Date.now(),
     });
     while (state.pendingQuestions.size > MAX_PENDING_QUESTIONS) state.pendingQuestions.delete(state.pendingQuestions.keys().next().value);
@@ -343,6 +347,7 @@ function handleWidgetQuestion(state, client, message) {
   }
   const questionId = randomUUID();
   const question = String(message.question || "Pi needs your input").slice(0, 3000);
+  const multiSelect = message.multiSelect === true;
   trackTask(state, withTopicRetry(state, client.sessionId, client.cwd, client.sessionName, async (topic) => {
     const sent = await telegramBetaCall(state.secret, "sendWidget", {
       chat_id: state.secret.chatId,
@@ -350,7 +355,7 @@ function handleWidgetQuestion(state, client, message) {
       html,
       caption: widgetQuestionCaption(question, options),
       allow_queries: true,
-      reply_markup: widgetQuestionKeyboard(questionId, options),
+      reply_markup: multiSelect ? toggleKeyboard(questionId, options) : widgetQuestionKeyboard(questionId, options),
     });
     state.pendingQuestions.set(questionId, {
       questionId,
@@ -361,6 +366,7 @@ function handleWidgetQuestion(state, client, message) {
       messageId: sent.message_id,
       question,
       options,
+      ...(multiSelect ? { multiSelect: true, selected: [] } : {}),
       createdAt: Date.now(),
     });
     topic.widgetIds = [...(topic.widgetIds || []), sent.message_id].slice(-MAX_TOPIC_WIDGETS);

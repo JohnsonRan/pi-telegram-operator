@@ -9,8 +9,8 @@ const { decodeWakePayload, WAKE_SENTINEL } = require("./src/wake/payload.cjs") a
   WAKE_SENTINEL: string;
 };
 const runtime = require("./src/runtime.cjs") as {
-  askQuestion(pi: ExtensionAPI, ctx: ExtensionContext, question: string, options: string[], signal?: AbortSignal): Promise<string>;
-  askWidgetQuestion(pi: ExtensionAPI, ctx: ExtensionContext, question: string, options: string[], widget?: string, signal?: AbortSignal): Promise<string>;
+  askQuestion(pi: ExtensionAPI, ctx: ExtensionContext, question: string, options: string[], signal?: AbortSignal, multiSelect?: boolean): Promise<string>;
+  askWidgetQuestion(pi: ExtensionAPI, ctx: ExtensionContext, question: string, options: string[], widget?: string, signal?: AbortSignal, multiSelect?: boolean): Promise<string>;
   attach(pi: ExtensionAPI): void;
   notify(pi: ExtensionAPI, ctx: ExtensionContext, title: string, body: string): Promise<void>;
   sendFile(pi: ExtensionAPI, ctx: ExtensionContext, filePath: string, caption?: string): Promise<void>;
@@ -128,15 +128,17 @@ export default function telegraPi(pi: ExtensionAPI): void {
       "Ask the user a multiple-choice question in this session's Telegram topic and wait for the selected answer. Use this instead of ask_user_question when the user is working remotely through Telegram.",
       "Pass `widget` (a self-contained HTML document, same limits and API as telegram_send_widget) to draw the question as a widget: it arrives as one widget message with your options as the inline keyboard under it, and the widget itself is where you show the choice, a preview or a comparison. The bot buttons below the widget answer the question; a widget that calls TelegramWidget.request() instead reaches Pi as a separate user message, which is not an answer.",
       "Without `widget` the question is a chat text message with one button per option, which every client shows.",
+      "Set `multiSelect` to let the user tick several options: each tap toggles a ✓ and nothing is returned until Done is pressed. The answer joins the chosen options with \", \".",
     ].join(" "),
     promptSnippet: "Ask the remote user a multiple-choice question through Telegram and wait for the answer.",
     parameters: Type.Object({
       question: Type.String({ minLength: 1, description: "Question shown to the user" }),
       options: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 10, description: "Selectable answers" }),
       widget: Type.Optional(Type.String({ minLength: 1, description: "HTML drawn as the question; instead of a text message, options become its inline keyboard" })),
+      multiSelect: Type.Optional(Type.Boolean({ description: "Let the user tick several options; the answer is them joined with \", \". Default false" })),
     }, { additionalProperties: false }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const answer = await runtime.askWidgetQuestion(pi, ctx, params.question, params.options, params.widget, signal);
+      const answer = await runtime.askWidgetQuestion(pi, ctx, params.question, params.options, params.widget, signal, params.multiSelect === true);
       return {
         content: [{ type: "text", text: `The user selected: ${answer}` }],
         details: { question: params.question, answer },

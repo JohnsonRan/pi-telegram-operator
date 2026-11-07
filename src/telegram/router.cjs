@@ -6,7 +6,7 @@ const { MAX_PENDING_REPLIES, MAX_TOPICS, pruneExpiredBrokerState, queuePersist }
 const { CONTROL_COMMANDS, CONTROL_PANEL_COMMANDS, RESTORE_CONTEXT_PROMPT, controlPanel, parseControlCallback, parseRestoreCallback, topicName, translateTelegramCommand } = require("./control.cjs");
 const { attachmentFromMessage, downloadTelegramAttachment } = require("./files.cjs");
 const { parseSessionAction, sendTopicChatAction, syncTopicDashboard, updateDashboard } = require("./dashboard.cjs");
-const { parseQuestionCallback } = require("./questions.cjs");
+const { parseQuestionCallback, parseQuestionDoneCallback, parseToggleCallback, toggleKeyboard } = require("./questions.cjs");
 const { cloneRepository, parseGitCloneCommand } = require("./git-clone.cjs");
 const { parsePiUpdateCommand, runPiUpdate } = require("./pi-update.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
@@ -529,67 +529,147 @@ async function restoreSessionTopic(state, restoreTopic, options = {}) {
   );
 }
 
+// A multi-select question answers only when Done is pressed; until then the taps are toggles.
+function selectedAnswerText(question) {
+  if (!question.multiSelect) return String(question.answer || "");
+  return (question.selected || [])
+    .map((index) => question.options[index])
+    .filter(Boolean)
+    .join(", ");
+}
+
+async function answerCallback(state, query, text, alert = false) {
+  await telegramCall(state.secret, "answerCallbackQuery", {
+    callback_query_id: query.id,
+    ...(text ? { text } : {}),
+    ...(text && alert ? { show_alert: true } : {}),
+  }).catch(warn("Cannot answer callback"));
+}
+
+// Toggling only redraws the keyboard under the same message, so a ten-item checklist stays one
+// message instead of ten edits.
+async function redrawToggleKeyboard(state, question, fallback = warn("Cannot redraw question buttons")) {
+  await telegramCall(state.secret, "editMessageReplyMarkup", {
+    chat_id: state.secret.chatId,
+    message_id: question.messageId,
+    reply_markup: toggleKeyboard(question.questionId, question.options, question.selected || []),
+  }).catch(fallback);
+}
+
+// The answer goes to the session that asked, and only if it is still connected; the broker keeps
+// the pending question and replays it when the client registers again.
+function deliverQuestionAnswerToClient(state, question, answer) {
+  const client = state.clients?.get(question.clientId);
+  if (!client?.registered || client.sessionId !== question.sessionId || typeof question.requestId !== "string") return false;
+  sendLine(client.socket, {
+    type: "result",
+    requestId: question.requestId,
+    questionId: question.questionId,
+    ok: true,
+    answer: String(answer),
+  });
+  return true;
+}
+
+// Replace the buttons with the answer, so an already-answered question cannot be tapped again.
+async function settleQuestionMessage(state, question, answer) {
+  const edited = { chat_id: state.secret.chatId, message_id: question.messageId };
+  await telegramRichCall(state.secret, "editMessageText", {
+    ...edited,
+    rich_message: { markdown: prepareRichMarkdown(`${question.question}\n\n**Selected:** ${escapeMarkdown(answer)}`) },
+  }, () => telegramCall(state.secret, "editMessageText", {
+    ...edited,
+    text: `${question.question}\n\nSelected: ${answer}`,
+    link_preview_options: { is_disabled: true },
+  })).catch(() => {});
+}
+
 async function handleCallbackQuery(state, query, options = {}) {
   if (!query || typeof query.id !== "string") return;
   const authorized = query.message?.chat?.id === state.secret.chatId && query.from?.id === state.secret.allowedUserId;
   const command = authorized ? parseControlCallback(query.data) : undefined;
   const questionAction = authorized ? parseQuestionCallback(query.data) : undefined;
-  const pendingQuestion = questionAction ? state.pendingQuestions?.get(questionAction.questionId) : undefined;
-  const selectedAnswer = pendingQuestion?.options?.[questionAction?.optionIndex];
+  const toggleAction = authorized ? parseToggleCallback(query.data) : undefined;
+  const doneAction = authorized ? parseQuestionDoneCallback(query.data) : undefined;
+  const pendingQuestion = questionAction
+    ? state.pendingQuestions?.get(questionAction.questionId)
+    : state.pendingQuestions?.get((toggleAction || doneAction)?.questionId);
+  // A toggle only flips a checkbox; Done is what answers a multi-select question.
+  const selectedAnswer = pendingQuestion && questionAction ? pendingQuestion.options?.[questionAction.optionIndex] : undefined;
   const sessionAction = authorized ? parseSessionAction(query.data) : undefined;
   const actionTopic = sessionAction ? state.topics.get(sessionAction.sessionId) : undefined;
   const restoreSessionId = authorized ? parseRestoreCallback(query.data) : undefined;
   const restoreTopic = restoreSessionId ? state.topics.get(restoreSessionId) : undefined;
-  if (!selectedAnswer) {
-    await telegramCall(state.secret, "answerCallbackQuery", {
-      callback_query_id: query.id,
-      ...(!authorized ? { text: "Not allowed.", show_alert: true } : {}),
-      ...(authorized && !command && !restoreTopic && !actionTopic ? { text: "This button is no longer available." } : {}),
-      ...(restoreTopic ? {
-        text: "Telegram cannot open topics automatically. Open the unread topic to see the restored context recap.",
-        show_alert: true,
-      } : {}),
-    }).catch(warn("Cannot answer callback"));
+  if (!selectedAnswer && !toggleAction && !doneAction) {
+    await answerCallback(state, query, !authorized
+      ? "Not allowed."
+      : (restoreTopic
+        ? "Telegram cannot open topics automatically. Open the unread topic to see the restored context recap."
+        : (authorized && !command && !actionTopic ? "This button is no longer available." : "")), true);
   }
   if (!authorized) return;
 
-  if (selectedAnswer && pendingQuestion) {
-    const deliverAnswer = options.deliverQuestionAnswer || ((_state, question, answer) => {
-      const client = state.clients?.get(question.clientId);
-      if (!client?.registered || client.sessionId !== question.sessionId || typeof question.requestId !== "string") return false;
-      sendLine(client.socket, {
-        type: "result",
-        requestId: question.requestId,
-        questionId: question.questionId,
-        ok: true,
-        answer: String(answer),
-      });
-      return true;
-    });
-    pendingQuestion.answer = String(selectedAnswer);
-    pendingQuestion.answeredAt = Date.now();
-    await (options.queuePersist || queuePersist)(state);
-    if (!deliverAnswer(state, pendingQuestion, selectedAnswer)) {
-      await telegramCall(state.secret, "answerCallbackQuery", {
-        callback_query_id: query.id,
-        text: "Pi is disconnected. This answer will be delivered when Pi reconnects.",
-        show_alert: true,
+  // A toggle redraws the keyboard and waits; nothing reaches Pi until Done.
+  if (toggleAction || doneAction) {
+    if (!pendingQuestion) {
+      await answerCallback(state, query, "This question is no longer available.", true);
+      return;
+    }
+    if (!pendingQuestion.multiSelect) {
+      await answerCallback(state, query, "This question takes a single answer.", true);
+      return;
+    }
+    const topic = state.topics.get(pendingQuestion.sessionId);
+    if (toggleAction) {
+      const index = toggleAction.optionIndex;
+      if (index >= pendingQuestion.options.length) {
+        await answerCallback(state, query, "This button is no longer available.", true);
+        return;
+      }
+      const selected = new Set(pendingQuestion.selected || []);
+      if (selected.has(index)) selected.delete(index);
+      else selected.add(index);
+      pendingQuestion.selected = [...selected].sort((left, right) => left - right);
+      await (options.queuePersist || queuePersist)(state);
+      await redrawToggleKeyboard(state, pendingQuestion, options.redrawQuestionKeyboard);
+      await answerCallback(state, query);
+      if (topic) await updateDashboard(state, topic, {
+        phase: "Waiting for answer",
+        detail: `${pendingQuestion.question} (${pendingQuestion.selected.length} selected)`,
       }).catch(() => {});
       return;
     }
-    await telegramCall(state.secret, "answerCallbackQuery", {
-      callback_query_id: query.id,
-      text: `Selected: ${String(selectedAnswer).slice(0, 150)}`,
-    }).catch(() => {});
-    const edited = { chat_id: state.secret.chatId, message_id: pendingQuestion.messageId };
-    await telegramRichCall(state.secret, "editMessageText", {
-      ...edited,
-      rich_message: { markdown: prepareRichMarkdown(`${pendingQuestion.question}\n\n**Selected:** ${escapeMarkdown(selectedAnswer)}`) },
-    }, () => telegramCall(state.secret, "editMessageText", {
-      ...edited,
-      text: `${pendingQuestion.question}\n\nSelected: ${selectedAnswer}`,
-      link_preview_options: { is_disabled: true },
-    })).catch(() => {});
+    const answer = selectedAnswerText(pendingQuestion);
+    if (!answer) {
+      await answerCallback(state, query, "Select at least one option first.", true);
+      return;
+    }
+    pendingQuestion.answer = answer;
+    pendingQuestion.answeredAt = Date.now();
+    await (options.queuePersist || queuePersist)(state);
+    const delivered = (options.deliverQuestionAnswer || deliverQuestionAnswerToClient)(state, pendingQuestion, answer);
+    if (!delivered) {
+      await answerCallback(state, query, "Pi is disconnected. This answer will be delivered when Pi reconnects.", true);
+      return;
+    }
+    await answerCallback(state, query, `Selected: ${answer.slice(0, 150)}`);
+    await settleQuestionMessage(state, pendingQuestion, answer);
+    if (topic) await (options.syncTopicDashboard || syncTopicDashboard)(state, topic, { phase: "Answer sent", detail: answer })
+      .then(() => (options.queuePersist || queuePersist)(state)).catch(() => {});
+    return;
+  }
+
+  if (selectedAnswer && pendingQuestion) {
+    pendingQuestion.answer = String(selectedAnswer);
+    pendingQuestion.answeredAt = Date.now();
+    await (options.queuePersist || queuePersist)(state);
+    const delivered = (options.deliverQuestionAnswer || deliverQuestionAnswerToClient)(state, pendingQuestion, selectedAnswer);
+    if (!delivered) {
+      await answerCallback(state, query, "Pi is disconnected. This answer will be delivered when Pi reconnects.", true);
+      return;
+    }
+    await answerCallback(state, query, `Selected: ${String(selectedAnswer).slice(0, 150)}`);
+    await settleQuestionMessage(state, pendingQuestion, selectedAnswer);
     const topic = state.topics.get(pendingQuestion.sessionId);
     if (topic) await (options.syncTopicDashboard || syncTopicDashboard)(state, topic, { phase: "Answer sent", detail: String(selectedAnswer) })
       .then(() => (options.queuePersist || queuePersist)(state)).catch(() => {});

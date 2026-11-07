@@ -147,3 +147,87 @@ test("the client asks the broker for a widget question with the widget attached"
   }
   assert.equal(state.pending.size, 0);
 });
+
+function toggleState(overrides = {}) {
+  return {
+    secret: { botToken: token, chatId: 42, allowedUserId: 7 },
+    topics: new Map([["session", { sessionId: "session", threadId: 9 }]]),
+    pendingQuestions: new Map([["12345678-1234-1234-1234-123456789abc", {
+      questionId,
+      requestId: "req",
+      clientId: "client",
+      sessionId: "session",
+      threadId: 9,
+      messageId: 90,
+      question: "Which checks?",
+      options: ["lint", "test", "build"],
+      multiSelect: true,
+      selected: [],
+      ...overrides,
+    }]]),
+    persistQueue: Promise.resolve(),
+  };
+}
+
+test("a multi-select question toggles options without answering until Done", async (t) => {
+  const calls = mockWidget(t);
+  const { __test: router } = require("../src/telegram/router.cjs");
+  const state = toggleState();
+  const delivered = [];
+  const opts = {
+    queuePersist: async () => {},
+    deliverQuestionAnswer: (_state, _question, answer) => { delivered.push(answer); return true; },
+    syncTopicDashboard: async () => {},
+  };
+  const tap = (data) => ({ id: `cb-${data}`, data, from: { id: 7 }, message: { message_id: 90, chat: { id: 42 } } });
+
+  // Two toggles, then untoggle the second: the keyboard is redrawn each time, nothing is answered.
+  for (const data of [`toggle:${questionId}:1`, `toggle:${questionId}:2`, `toggle:${questionId}:2`]) {
+    await router.handleCallbackQuery(state, tap(data), opts);
+  }
+  assert.deepEqual(state.pendingQuestions.get(questionId).selected, [1]);
+  assert.deepEqual(delivered, []);
+  assert.equal(calls.filter((call) => call.url.endsWith("/editMessageReplyMarkup")).length, 3);
+  const redraw = calls.filter((call) => call.url.endsWith("/editMessageReplyMarkup")).at(-1).body.reply_markup.inline_keyboard;
+  assert.equal(redraw[1][0].text, "✓ test");
+  assert.equal(redraw[3][0].text, "Done (1)");
+
+  // Done answers with the selected labels in option order.
+  await router.handleCallbackQuery(state, tap(`toggle:${questionId}:2`), opts);
+  await router.handleCallbackQuery(state, tap(`qdone:${questionId}`), opts);
+  assert.deepEqual(delivered, ["test, build"]);
+  assert.equal(state.pendingQuestions.get(questionId).answer, "test, build");
+});
+
+test("Done refuses an empty multi-select and points out a single-answer question", async (t) => {
+  mockWidget(t);
+  const { __test: router } = require("../src/telegram/router.cjs");
+  const state = toggleState();
+  const delivered = [];
+  const alerts = [];
+  const opts = {
+    queuePersist: async () => {},
+    deliverQuestionAnswer: (_state, _question, answer) => { delivered.push(answer); return true; },
+    syncTopicDashboard: async () => {},
+  };
+  const tap = (data) => ({ id: data, data, from: { id: 7 }, message: { message_id: 90, chat: { id: 42 } } });
+  await router.handleCallbackQuery(state, tap(`qdone:${questionId}`), opts);
+  assert.deepEqual(delivered, []);
+  assert.equal(state.pendingQuestions.get(questionId).answer, undefined);
+
+  // A toggle on a single-answer question is rejected instead of silently answering it.
+  delete state.pendingQuestions.get(questionId).multiSelect;
+  await router.handleCallbackQuery(state, tap(`toggle:${questionId}:0`), opts);
+  assert.deepEqual(delivered, []);
+});
+
+test("toggle and Done callbacks are distinct from a plain question answer", () => {
+  const { parseToggleCallback, parseQuestionDoneCallback, toggleKeyboard, toggleCallbackData, questionDoneCallbackData } = require("../src/telegram/questions.cjs");
+  assert.equal(parseQuestionCallback(toggleCallbackData(questionId, 1)), undefined);
+  assert.deepEqual(parseToggleCallback(toggleCallbackData(questionId, 1)), { questionId, optionIndex: 1 });
+  assert.deepEqual(parseQuestionDoneCallback(questionDoneCallbackData(questionId)), { questionId });
+  assert.equal(parseToggleCallback("question:" + questionId + ":1"), undefined);
+  const keyboard = toggleKeyboard(questionId, ["a", "b"], [1]);
+  assert.deepEqual(keyboard.inline_keyboard.map((row) => row[0].text), ["a", "✓ b", "Done (1)"]);
+  assert.equal(keyboard.inline_keyboard.at(-1)[0].callback_data, `qdone:${questionId}`);
+});

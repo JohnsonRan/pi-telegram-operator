@@ -385,22 +385,24 @@ function requestArtifact(state, filePath, caption) {
   }, "Telegram artifact upload", 75_000);
 }
 
-function requestQuestion(state, question, options, signal) {
+function requestQuestion(state, question, options, signal, multiSelect = false) {
   return requestBroker(state, {
     type: "question",
     question: String(question || "Pi needs your input"),
     options: Array.isArray(options) ? options.map(String) : [],
+    ...(multiSelect ? { multiSelect: true } : {}),
   }, "Telegram question", 24 * 60 * 60 * 1_000, { durable: true, signal });
 }
 
 // Same handshake as a plain question, but the broker asks sendWidget for a widget message with the
 // options as its inline keyboard. Callers pass a widget only once checkWidgetSize() accepted it.
-function requestWidgetQuestion(state, question, options, widget, signal) {
+function requestWidgetQuestion(state, question, options, widget, signal, multiSelect = false) {
   return requestBroker(state, {
     type: "widgetQuestion",
     question: String(question || "Pi needs your input"),
     options: Array.isArray(options) ? options.map(String) : [],
     widget: String(widget || ""),
+    ...(multiSelect ? { multiSelect: true } : {}),
   }, "Telegram widget question", 24 * 60 * 60 * 1_000, { durable: true, signal });
 }
 

@@ -18,8 +18,8 @@ async function notify(pi, ctx, title, body) {
   await requestNotification(await initializeState(pi, ctx), title, body);
 }
 
-async function askQuestion(pi, ctx, question, options, signal) {
-  const result = await requestQuestion(await initializeState(pi, ctx), question, options, signal);
+async function askQuestion(pi, ctx, question, options, signal, multiSelect = false) {
+  const result = await requestQuestion(await initializeState(pi, ctx), question, options, signal, multiSelect);
   return String(result.answer || "");
 }
 
@@ -49,11 +49,11 @@ async function updateWidget(pi, ctx, messageId, data) {
 
 // A widget question without a widget of its own keeps the plain question, so callers can always
 // pass widget through and only the broker and the client decide what the user sees.
-async function askWidgetQuestion(pi, ctx, question, options, widget, signal) {
+async function askWidgetQuestion(pi, ctx, question, options, widget, signal, multiSelect = false) {
   const html = String(widget || "").trim();
-  if (!html) return askQuestion(pi, ctx, question, options, signal);
+  if (!html) return askQuestion(pi, ctx, question, options, signal, multiSelect);
   checkWidgetSize(html);
-  const result = await requestWidgetQuestion(await initializeState(pi, ctx), question, options, html, signal);
+  const result = await requestWidgetQuestion(await initializeState(pi, ctx), question, options, html, signal, multiSelect);
   return String(result.answer || "");
 }
 

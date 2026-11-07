@@ -8,13 +8,56 @@ function parseQuestionCallback(value) {
   return { questionId: match[1], optionIndex: Number(match[2]) };
 }
 
+// Multi-select turns buttons into toggles plus one Done button, so its callbacks need their own
+// namespace: `question` means "this option is the answer", `toggle` means "flip it".
+function toggleCallbackData(questionId, optionIndex) {
+  return `toggle:${questionId}:${optionIndex}`;
+}
+
+function parseToggleCallback(value) {
+  const match = String(value || "").match(/^toggle:([0-9a-f-]{36}):(\d{1,2})$/i);
+  if (!match) return undefined;
+  return { questionId: match[1], optionIndex: Number(match[2]) };
+}
+
+function questionDoneCallbackData(questionId) {
+  return `qdone:${questionId}`;
+}
+
+function parseQuestionDoneCallback(value) {
+  const match = String(value || "").match(/^qdone:([0-9a-f-]{36})$/i);
+  return match ? { questionId: match[1] } : undefined;
+}
+
+// Telegram drops a button label past 64 characters and refuses an empty one.
+function buttonText(option, selected) {
+  const text = String(option).slice(0, 62);
+  return selected ? `✓ ${text}` : text;
+}
+
 function questionKeyboard(questionId, options) {
   return {
     inline_keyboard: options.map((option, index) => [{
-      text: String(option).slice(0, 64),
+      text: buttonText(option, false),
       callback_data: questionCallbackData(questionId, index),
     }]),
   };
+}
+
+// Multi-select: every option toggles, and nothing is sent to Pi until Done. The keyboard is
+// redrawn on each toggle so the checkmarks are the state; Telegram edits the same message rather
+// than posting new ones, which keeps a long checklist out of the chat history.
+function toggleKeyboard(questionId, options, selected = []) {
+  const chosen = new Set(selected);
+  const rows = options.map((option, index) => [{
+    text: buttonText(option, chosen.has(index)),
+    callback_data: toggleCallbackData(questionId, index),
+  }]);
+  rows.push([{
+    text: chosen.size ? `Done (${chosen.size})` : "Done",
+    callback_data: questionDoneCallbackData(questionId),
+  }]);
+  return { inline_keyboard: rows };
 }
 
 // Bot API 10.4 sendWidget takes reply_markup, so a widget question keeps its options as buttons
@@ -25,7 +68,7 @@ function widgetQuestionKeyboard(questionId, options) {
   const rows = [];
   for (let index = 0; index < options.length; index += 2) {
     rows.push(options.slice(index, index + 2).map((option, offset) => ({
-      text: String(option).slice(0, 64),
+      text: buttonText(option, false),
       callback_data: questionCallbackData(questionId, index + offset),
     })));
   }
@@ -41,8 +84,13 @@ function widgetQuestionCaption(question, options) {
 
 module.exports = Object.freeze({
   parseQuestionCallback,
+  parseQuestionDoneCallback,
+  parseToggleCallback,
   questionCallbackData,
+  questionDoneCallbackData,
   questionKeyboard,
+  toggleCallbackData,
+  toggleKeyboard,
   widgetQuestionCaption,
   widgetQuestionKeyboard,
 });
