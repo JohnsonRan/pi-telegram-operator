@@ -13,6 +13,26 @@ const runtime = require("./src/runtime.cjs") as {
   attach(pi: ExtensionAPI): void;
   notify(pi: ExtensionAPI, ctx: ExtensionContext, title: string, body: string): Promise<void>;
   sendFile(pi: ExtensionAPI, ctx: ExtensionContext, filePath: string, caption?: string): Promise<void>;
+  sendWidget(pi: ExtensionAPI, ctx: ExtensionContext, widget: WidgetRequest): Promise<number>;
+  updateWidget(pi: ExtensionAPI, ctx: ExtensionContext, messageId: number, data: WidgetData): Promise<void>;
+};
+
+interface WidgetData {
+  chatData?: string;
+  publicData?: string;
+}
+
+interface WidgetRequest extends WidgetData {
+  html: string;
+  caption?: string;
+  width?: number;
+  height?: number;
+  allowQueries?: boolean;
+}
+
+const WIDGET_STATE = {
+  chatData: Type.Optional(Type.String({ maxLength: 1024, description: "Chat state (TelegramWidget.chatData), up to 1024 UTF-8 bytes; \"\" clears it" })),
+  publicData: Type.Optional(Type.String({ maxLength: 1024, description: "Shared state (TelegramWidget.publicData), also seen in forwards; up to 1024 UTF-8 bytes; \"\" clears it" })),
 };
 
 const SEMANTIC_HOOK_CHANNEL = "pi:semantic-hook:v1";
@@ -114,6 +134,54 @@ export default function telegraPi(pi: ExtensionAPI): void {
       return {
         content: [{ type: "text", text: `The user selected: ${answer}` }],
         details: { question: params.question, answer },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "telegram_send_widget",
+    label: "Send Telegram widget",
+    description: [
+      "Send an interactive HTML widget (Bot API 10.4) into this session's Telegram topic; returns its message id.",
+      "One self-contained HTML document with inline CSS/JS: at most 32768 bytes and 4096 bytes after zlib level 9, so keep it small (no comments, no data: images).",
+      "No network, no navigation, no libraries; the bubble is 200-600 px wide and at most 600 px tall, nothing scrolls inside. Style with var(--tg-theme-bg-color), --tg-theme-text-color, --tg-theme-hint-color, --tg-theme-button-color, --tg-theme-button-text-color.",
+      "JS API on window.TelegramWidget: chatData / publicData (strings or null, written only by Pi), onEvent('chatDataChanged' | 'publicDataChanged', redraw), request(data) (1-64 bytes, on a tap), openLink(url), copyText(text), HapticFeedback; localStorage (4 KB) for per-device state.",
+      "request(data) resolves at once with { result: null }; the data reaches Pi as a user message 'Telegram widget <id> request: <data>', and Pi answers by calling telegram_update_widget, which fires the change events.",
+      "Full guide: https://github.com/TelegramMessenger/widget-sandbox/blob/main/docs/widget-runtime-profile.md",
+    ].join(" "),
+    promptSnippet: "Send an interactive HTML/CSS/JS widget (poll, game, dashboard) into the user's Telegram topic.",
+    parameters: Type.Object({
+      html: Type.String({ minLength: 1, description: "The widget's HTML document" }),
+      caption: Type.Optional(Type.String({ description: "Caption, also used for the chat list and as the fallback on old clients" })),
+      width: Type.Optional(Type.Integer({ minimum: 0, description: "Width in px (200-600); 0 or omitted = bubble width" })),
+      height: Type.Optional(Type.Integer({ minimum: 0, description: "Fixed height in px (50-600); 0 or omitted = content height" })),
+      allowQueries: Type.Optional(Type.Boolean({ description: "Let TelegramWidget.request() reach Pi (default true)" })),
+      ...WIDGET_STATE,
+    }, { additionalProperties: false }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const messageId = await runtime.sendWidget(pi, ctx, params);
+      return {
+        content: [{ type: "text", text: `Sent widget ${messageId} to Telegram.` }],
+        details: { messageId },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "telegram_update_widget",
+    label: "Update Telegram widget",
+    description: "Replace the chat state and/or shared state of a widget this session sent with telegram_send_widget. The widget redraws through its chatDataChanged / publicDataChanged handlers; omitted fields stay as they are.",
+    promptSnippet: "Update the state of a Telegram widget, e.g. after a widget request.",
+    parameters: Type.Object({
+      messageId: Type.Integer({ description: "Widget message id returned by telegram_send_widget" }),
+      ...WIDGET_STATE,
+    }, { additionalProperties: false }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { messageId, ...data } = params;
+      await runtime.updateWidget(pi, ctx, messageId, data);
+      return {
+        content: [{ type: "text", text: `Updated widget ${messageId}.` }],
+        details: { messageId },
       };
     },
   });

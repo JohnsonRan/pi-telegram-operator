@@ -19,7 +19,7 @@ const { dashboardKeyboard, sendTopicChatAction, updateDashboard } = require("../
 const { questionKeyboard } = require("../telegram/questions.cjs");
 const { AGENT_DIR } = require("../shared/paths.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
-const { richEnabled, telegramCall, telegramFormattedCall, telegramRichCall } = require("../telegram/api.cjs");
+const { richEnabled, telegramBetaCall, telegramCall, telegramFormattedCall, telegramRichCall } = require("../telegram/api.cjs");
 const {
   deliverPendingForSession,
   deliverPendingReply,
@@ -35,6 +35,8 @@ const { WakeLauncher } = require("../wake/launcher.cjs");
 const { version: PACKAGE_VERSION } = require("../../package.json");
 
 const STATE_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Widget message ids kept per topic to route taps back to its session.
+const MAX_TOPIC_WIDGETS = 50;
 
 // Sends Markdown as rich messages; a piece the API rejects goes out as legacy HTML chunks.
 async function sendMarkdown(state, topic, markdown, replyMarkup) {
@@ -344,6 +346,57 @@ function handleArtifact(state, client, message) {
   });
 }
 
+// Optional text fields: undefined leaves the widget state alone, "" clears it.
+function widgetState(message) {
+  return {
+    ...(typeof message.chatData === "string" ? { chat_data: message.chatData } : {}),
+    ...(typeof message.publicData === "string" ? { public_data: message.publicData } : {}),
+  };
+}
+
+function handleWidget(state, client, message) {
+  if (!(client.registered && typeof message.requestId === "string")) return;
+  trackTask(state, withTopicRetry(state, client.sessionId, client.cwd, client.sessionName, async (topic) => {
+    const sent = await telegramBetaCall(state.secret, "sendWidget", {
+      chat_id: state.secret.chatId,
+      message_thread_id: topic.threadId,
+      html: String(message.html || ""),
+      ...(message.caption ? { caption: String(message.caption) } : {}),
+      ...(Number.isSafeInteger(message.width) && message.width > 0 ? { width: message.width } : {}),
+      ...(Number.isSafeInteger(message.height) && message.height > 0 ? { height: message.height } : {}),
+      ...(message.allowQueries !== false ? { allow_queries: true } : {}),
+      ...widgetState(message),
+    });
+    topic.widgetIds = [...(topic.widgetIds || []), sent.message_id].slice(-MAX_TOPIC_WIDGETS);
+    await queuePersist(state);
+    return sent;
+  })).then((sent) => {
+    sendSuccess(client, message.requestId, { messageId: sent.message_id });
+  }).catch((error) => {
+    sendFailure(client, message.requestId, error);
+  });
+}
+
+function handleWidgetData(state, client, message) {
+  if (!(client.registered && typeof message.requestId === "string")) return;
+  const topic = state.topics.get(client.sessionId);
+  if (!topic?.widgetIds?.includes(message.messageId)) {
+    sendFailure(client, message.requestId, `Widget ${message.messageId} was not sent by this session`);
+    return;
+  }
+  trackTask(state, telegramBetaCall(state.secret, "editMessageWidgetData", {
+    chat_id: state.secret.chatId,
+    message_id: message.messageId,
+    ...widgetState(message),
+  }).catch((error) => {
+    if (!/message is not modified/i.test(errorMessage(error))) throw error;
+  })).then(() => {
+    sendSuccess(client, message.requestId);
+  }).catch((error) => {
+    sendFailure(client, message.requestId, error);
+  });
+}
+
 function handleNotify(state, client, message) {
   if (!client.registered || typeof message.requestId !== "string") return;
   trackTask(state, sendNotification(state, client, message)).then((sent) => {
@@ -362,6 +415,8 @@ const BROKER_HANDLERS = new Map(Object.entries({
   question: handleQuestion,
   artifact: handleArtifact,
   notify: handleNotify,
+  widget: handleWidget,
+  widgetData: handleWidgetData,
 }));
 
 function handleBrokerRequest(state, client, message) {

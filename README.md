@@ -17,6 +17,7 @@ Pi session B  ⇄  Telegram topic "project-b · 5e6f7a8b"
 - **Control the session with buttons.** Each topic has a pinned status card with **Continue**, **Stop**, **Retry**, and **Refresh status** buttons.
 - **Answer Pi's questions.** When Pi asks a multiple-choice question, you get tap-to-answer buttons.
 - **Exchange files.** Send Pi a photo or document; Pi can send reports, archives, and images back.
+- **Use interactive widgets.** Pi can send small HTML, CSS, and JavaScript widgets (polls, games, dashboards) that run right inside the chat (Telegram 13.2+).
 - **Run Pi commands.** Your Pi extension commands, prompt templates, and skills appear in Telegram's `/` menu.
 - **Wake Pi remotely** (optional). Message a stopped session to resume it, create new sessions, clone a repository, or update Pi, all from the chat.
 
@@ -70,6 +71,12 @@ Start Pi as usual. The first time a session sends something (a finished answer, 
 ### Questions
 
 Pi can use the `telegram_ask_user_question` tool to ask you a question with answer buttons, and it waits for your tap. Questions Pi asks in the terminal (`ask_user_question`) still show up as a notification, but you answer them at the computer.
+
+### Widgets
+
+Pi can use the `telegram_send_widget` tool to send an interactive HTML widget into the topic (Bot API 10.4; Telegram 13.2+ or Desktop 7.4+). The HTML may be at most 32 KB, and at most 4 KB after compression. When you tap something in a widget that calls `TelegramWidget.request(data)`, the request reaches the session as a user message. Pi replies by updating the widget's state with `telegram_update_widget`, and the widget redraws in place. You don't get a new message.
+
+For now Telegram serves Bot API 10.4 only under `https://api.telegram.org/beta`, so TelegraPi polls updates and sends widgets through that path. If `/beta` stops responding, it switches back to the normal URL. A custom `apiBaseUrl` is always used as is.
 
 ### Pi commands
 

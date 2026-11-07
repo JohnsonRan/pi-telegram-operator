@@ -93,4 +93,20 @@ async function telegramRichCall(secret, method, payload, legacy, files = []) {
 
 const richEnabled = () => !richUnsupported;
 
-module.exports = Object.freeze({ DEFAULT_API_BASE_URL, richEnabled, telegramCall, telegramFormattedCall, telegramRichCall, telegramMultipartCall, telegramUrl });
+// Bot API 10.4 widgets (sendWidget, widget_query updates) are served only under Telegram's /beta
+// path for now. Self-hosted servers keep their own URL; once /beta goes away we fall back to it.
+let betaMissing = false;
+
+async function telegramBetaCall(secret, method, payload, timeoutMs, externalSignal) {
+  if (!betaMissing && (secret.apiBaseUrl || DEFAULT_API_BASE_URL) === DEFAULT_API_BASE_URL) {
+    try {
+      return await telegramCall({ ...secret, apiBaseUrl: `${DEFAULT_API_BASE_URL}/beta` }, method, payload, timeoutMs, externalSignal);
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      betaMissing = true;
+    }
+  }
+  return telegramCall(secret, method, payload, timeoutMs, externalSignal);
+}
+
+module.exports = Object.freeze({ DEFAULT_API_BASE_URL, richEnabled, telegramBetaCall, telegramCall, telegramFormattedCall, telegramRichCall, telegramMultipartCall, telegramUrl });

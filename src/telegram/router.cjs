@@ -10,7 +10,7 @@ const { parseQuestionCallback } = require("./questions.cjs");
 const { cloneRepository, parseGitCloneCommand } = require("./git-clone.cjs");
 const { parsePiUpdateCommand, runPiUpdate } = require("./pi-update.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
-const { telegramCall, telegramRichCall } = require("./api.cjs");
+const { telegramBetaCall, telegramCall, telegramRichCall } = require("./api.cjs");
 const { escapeMarkdown, prepareRichMarkdown } = require("./format.cjs");
 const { parseControlCommand, resolveWakeCwd } = require("../wake/launcher.cjs");
 
@@ -402,7 +402,11 @@ async function handleTelegramMessage(state, message) {
 
   const targetTopic = state.topics.get(target.sessionId);
   message = { ...message, text: translateTelegramCommand(targetTopic, message.text) };
+  await deliverToSession(state, target, message, replyOptions);
+}
 
+// Queues text for a session, waking it first when wake mode is on and it is offline.
+async function deliverToSession(state, target, message, replyOptions) {
   let holdForWake = false;
   if (!connectedTarget(state, target.sessionId) && state.secret.wakeMode) {
     const topic = state.topics.get(target.sessionId);
@@ -440,6 +444,21 @@ async function handleTelegramMessage(state, message) {
       ? "Reply queued behind the session's current wake turn."
       : "Reply queued until the target Pi session reconnects.", replyOptions).catch(warn("Cannot send reply notice"));
   }
+}
+
+// A widget tap reaches Pi as a user message. The widget gets an empty answer at once: its
+// 15 s window is too short for a model turn, so Pi replies by editing the widget's state.
+async function handleWidgetQuery(state, query) {
+  await telegramBetaCall(state.secret, "answerWidgetQuery", { widget_query_id: query.id })
+    .catch(warn("Cannot answer widget query"));
+  if (query.from?.id !== state.secret.allowedUserId || query.chat?.id !== state.secret.chatId) return;
+  const topic = [...state.topics.values()].find((item) => item.widgetIds?.includes(query.message_id));
+  if (!topic) return;
+  await deliverToSession(state, { sessionId: topic.sessionId, threadId: topic.threadId }, {
+    deliveryId: `widget:${query.id}`,
+    message_thread_id: topic.threadId,
+    text: `Telegram widget ${query.message_id} request: ${String(query.data ?? "")}`,
+  }, { threadId: topic.threadId });
 }
 
 async function restoreSessionTopic(state, restoreTopic, options = {}) {
@@ -626,6 +645,7 @@ async function processTelegramUpdate(state, update, options = {}) {
   try {
     if (update.message) await (options.handleTelegramMessage || handleTelegramMessage)(state, update.message);
     if (update.callback_query) await (options.handleCallbackQuery || handleCallbackQuery)(state, update.callback_query);
+    if (update.widget_query) await (options.handleWidgetQuery || handleWidgetQuery)(state, update.widget_query);
     if (update.stopped_message_generation) {
       await (options.handleGenerationStopped || handleGenerationStopped)(state, update.stopped_message_generation);
     }
@@ -646,10 +666,10 @@ async function pollTelegram(state) {
     const controller = new AbortController();
     state.pollController = controller;
     try {
-      const updates = await telegramCall(state.secret, "getUpdates", {
+      const updates = await telegramBetaCall(state.secret, "getUpdates", {
         offset: state.offset,
         timeout: 25,
-        allowed_updates: ["message", "callback_query", "stopped_message_generation"],
+        allowed_updates: ["message", "callback_query", "stopped_message_generation", "widget_query"],
       }, 35_000, controller.signal);
       for (const update of updates) await processTelegramUpdate(state, update);
     } catch (error) {
@@ -679,6 +699,7 @@ module.exports = Object.freeze({
     handleCallbackQuery,
     handleControlMessage,
     handleGenerationStopped,
+    handleWidgetQuery,
     launchWakeSession,
     processTelegramUpdate,
     restoreSessionTopic,

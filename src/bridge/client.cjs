@@ -393,6 +393,14 @@ function requestQuestion(state, question, options, signal) {
   }, "Telegram question", 24 * 60 * 60 * 1_000, { durable: true, signal });
 }
 
+function requestWidget(state, widget) {
+  return requestBroker(state, { type: "widget", ...widget }, "Telegram widget");
+}
+
+function requestWidgetData(state, messageId, data) {
+  return requestBroker(state, { type: "widgetData", messageId, ...data }, "Telegram widget update");
+}
+
 async function initializeState(pi, ctx) {
   const state = clientStateFor(pi, ctx);
   if (!state.ready) {
@@ -420,5 +428,7 @@ module.exports = Object.freeze({
   requestBroker,
   requestNotification,
   requestQuestion,
+  requestWidget,
+  requestWidgetData,
   __test: Object.freeze({ handleClientMessage, rejectPending, scheduleReconnect }),
 });

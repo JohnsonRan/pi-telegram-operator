@@ -7,7 +7,8 @@
  * while each connected Pi process injects replies with pi.sendUserMessage().
  */
 
-const { initializeState, requestArtifact, requestNotification, requestQuestion } = require("./bridge/client.cjs");
+const { deflateSync } = require("node:zlib");
+const { initializeState, requestArtifact, requestNotification, requestQuestion, requestWidget, requestWidgetData } = require("./bridge/client.cjs");
 const { closeLeader, startLocalLeader } = require("./broker/server.cjs");
 const { readSettings: readSecret } = require("./shared/settings.cjs");
 const { attach } = require("./session/streaming.cjs");
@@ -24,6 +25,26 @@ async function askQuestion(pi, ctx, question, options, signal) {
 
 async function sendFile(pi, ctx, filePath, caption = "") {
   await requestArtifact(await initializeState(pi, ctx), filePath, caption);
+}
+
+// Telegram refuses widgets over 32768 bytes of HTML or 4096 bytes after zlib level 9;
+// checking here tells the model by how much it is over.
+function checkWidgetSize(html) {
+  const raw = Buffer.byteLength(html);
+  const packed = deflateSync(html, { level: 9 }).length;
+  if (raw > 32_768 || packed > 4_096) {
+    throw new Error(`Widget HTML is ${raw} bytes, ${packed} compressed; the limits are 32768 and 4096 (zlib level 9)`);
+  }
+}
+
+async function sendWidget(pi, ctx, widget) {
+  checkWidgetSize(widget.html);
+  const result = await requestWidget(await initializeState(pi, ctx), widget);
+  return result.messageId;
+}
+
+async function updateWidget(pi, ctx, messageId, data) {
+  await requestWidgetData(await initializeState(pi, ctx), messageId, data);
 }
 
 async function runWakeDaemon() {
@@ -55,4 +76,6 @@ module.exports = Object.freeze({
   notify,
   runWakeDaemon,
   sendFile,
+  sendWidget,
+  updateWidget,
 });
