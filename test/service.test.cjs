@@ -16,6 +16,11 @@ test("stops only the exact Windows daemon process without killing its Pi childre
   assert.match(script, /--pi-telegram-operator-service-daemon/);
   assert.doesNotMatch(script, /pi-notify-telegram/);
   assert.doesNotMatch(script, /taskkill|\/T\b/i);
+  // A Pi session starts the same broker from pi.exe, not only node.exe.
+  assert.match(script, /'node','pi','bun','tsx'/);
+  // The matching process must not stop itself, since its command line carries the marker.
+  assert.match(script, /\$_\.ProcessId -eq \$PID/);
+  assert.doesNotMatch(script, /"?_\$marker"?/);
 });
 
 test("Windows daemon cleanup preserves child Pi processes", { skip: process.platform !== "win32" }, async () => {

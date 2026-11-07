@@ -41,9 +41,22 @@ function launchAgentPath(label = MAC_LABEL) {
   return path.join(os.homedir(), "Library", "LaunchAgents", `${label}.plist`);
 }
 
+// The daemon runs as `node.exe daemon.cjs <marker>`, but a Pi session starts the same broker with
+// its own executable (pi.exe, bun.exe, ...). Matching only node.exe left the previous broker alive
+// and holding the port, so a restart after an update kept serving the stale code.
+// This process is skipped: its own command line carries the marker too.
 function windowsDaemonStopScript() {
   const marker = WINDOWS_DAEMON_MARKER.replace(/'/g, "''");
-  return `$marker='${marker}'; Get-CimInstance Win32_Process | Where-Object { if ($_.Name -ne 'node.exe') { return $false }; $pattern='(?i)(?:^|\\s)"?' + [regex]::Escape($marker) + '"?(?:\\s|$)'; $_.CommandLine -match $pattern } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+  return [
+    `$marker='${marker}';`,
+    "$runtimes=@('node','pi','bun','tsx');",
+    "Get-CimInstance Win32_Process | Where-Object {",
+    "  if ($_.ProcessId -eq $PID) { return $false }",
+    "  if ($runtimes -notcontains ([System.IO.Path]::GetFileNameWithoutExtension($_.Name)).ToLower()) { return $false }",
+    "  $pattern='(?i)' + [regex]::Escape($marker) + '(?:\\s|$)'",
+    "  $_.CommandLine -match $pattern",
+    "} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+  ].join("\n");
 }
 
 function windowsTaskStopWaitScript(taskName = WINDOWS_TASK, timeoutMs = 5_000) {
