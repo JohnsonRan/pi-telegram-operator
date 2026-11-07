@@ -76,7 +76,7 @@ Pi can use the `telegram_ask_user_question` tool to ask you a question with answ
 
 Pi can use the `telegram_send_widget` tool to send an interactive HTML widget into the topic (Bot API 10.4; Telegram 13.2+ or Desktop 7.4+). The HTML may be at most 32 KB, and at most 4 KB after compression. When you tap something in a widget that calls `TelegramWidget.request(data)`, the request reaches the session as a user message. Pi replies by updating the widget's state with `telegram_update_widget`, and the widget redraws in place. You don't get a new message.
 
-For now Telegram serves Bot API 10.4 only under `https://api.telegram.org/beta`, so TelegraPi polls updates and sends widgets through that path. If `/beta` stops responding, it switches back to the normal URL. A custom `apiBaseUrl` is always used as is.
+For now Telegram serves Bot API 10.4 only under `https://api.telegram.org/beta`, so TelegraPi polls updates and sends widgets through that path. If `/beta` answers 404, TelegraPi switches back to the normal URL for good. After three network or 5xx failures in a row, it uses the normal URL for 10 minutes. Either way your messages keep arriving, but widgets stop working until `/beta` is back. A custom `apiBaseUrl` is always used as is.
 
 ### Pi commands
 
