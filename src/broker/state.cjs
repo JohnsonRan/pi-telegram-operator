@@ -12,9 +12,8 @@ async function readBrokerState(statePath = STATE_PATH) {
   try {
     const raw = JSON.parse(await readFile(statePath, "utf8"));
     const offset = Number.isSafeInteger(raw?.offset) && raw.offset >= 0 ? raw.offset : 0;
-    // Offsets are per getUpdates queue (plain and /beta suffer unrelated update_id ranges).
-    // Older versions kept one `offset`; it belonged to whichever queue was being polled, which in
-    // practice was the plain one, so migrate it there rather than dropping pending messages.
+    // Keep historical offsets, but polling now uses only plain; /beta had unrelated update ids.
+    // Legacy single offsets still migrate to plain when no per-queue record exists.
     const offsets = {};
     for (const [key, value] of Object.entries(raw?.offsets && typeof raw.offsets === "object" ? raw.offsets : {})) {
       if (Number.isSafeInteger(value) && value >= 0) offsets[key] = value;

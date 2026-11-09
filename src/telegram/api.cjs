@@ -1,4 +1,4 @@
-const { errorMessage, warn } = require("../shared/errors.cjs");
+const { errorMessage } = require("../shared/errors.cjs");
 
 const DEFAULT_API_BASE_URL = "https://api.telegram.org";
 
@@ -93,46 +93,4 @@ async function telegramRichCall(secret, method, payload, legacy, files = []) {
 
 const richEnabled = () => !richUnsupported;
 
-// Bot API 10.4 widgets (sendWidget, widget_query updates) are served only under Telegram's /beta
-// path for now. Self-hosted servers keep their own URL. Polling goes through here too, so a
-// broken /beta must not cut off ordinary messages: a 404 drops it for good, and repeated
-// network or 5xx failures pause it for a while.
-const BETA_MAX_FAILURES = 3;
-const BETA_PAUSE_MS = 10 * 60_000;
-let betaMissing = false;
-let betaFailures = 0;
-let betaPausedUntil = 0;
-
-// `result.viaBeta` tells the caller which endpoint actually answered. /beta keeps its own
-// getUpdates queue with its own update_id range, so an offset from one endpoint is meaningless
-// to the other; the poller must not carry one across.
-// /beta keeps its own getUpdates queue with its own update_id range, so an offset from one
-// endpoint is meaningless to the other. The poller needs to know which one answered, and to
-// build a different payload for each (each queue has its own offset).
-async function telegramBetaCallRouted(secret, method, payload, timeoutMs, externalSignal) {
-  const body = (viaBeta) => (typeof payload === "function" ? payload(viaBeta) : payload);
-  const official = (secret.apiBaseUrl || DEFAULT_API_BASE_URL) === DEFAULT_API_BASE_URL;
-  if (official && !betaMissing && Date.now() >= betaPausedUntil) {
-    try {
-      const result = await telegramCall({ ...secret, apiBaseUrl: `${DEFAULT_API_BASE_URL}/beta` }, method, body(true), timeoutMs, externalSignal);
-      betaFailures = 0;
-      return { result, viaBeta: true };
-    } catch (error) {
-      if (error.status === 404) betaMissing = true;
-      // Any other 4xx is a real answer (bad parameters, flood control), not a broken endpoint.
-      else if (error.status < 500 || ++betaFailures < BETA_MAX_FAILURES) throw error;
-      else {
-        betaFailures = 0;
-        betaPausedUntil = Date.now() + BETA_PAUSE_MS;
-        warn("Telegram /beta keeps failing; using the plain Bot API URL for 10 minutes")(error);
-      }
-    }
-  }
-  return { result: await telegramCall(secret, method, body(false), timeoutMs, externalSignal), viaBeta: false };
-}
-
-async function telegramBetaCall(secret, method, payload, timeoutMs, externalSignal) {
-  return (await telegramBetaCallRouted(secret, method, payload, timeoutMs, externalSignal)).result;
-}
-
-module.exports = Object.freeze({ DEFAULT_API_BASE_URL, richEnabled, telegramBetaCall, telegramBetaCallRouted, telegramCall, telegramFormattedCall, telegramRichCall, telegramMultipartCall, telegramUrl });
+module.exports = Object.freeze({ DEFAULT_API_BASE_URL, richEnabled, telegramCall, telegramFormattedCall, telegramRichCall, telegramMultipartCall, telegramUrl });

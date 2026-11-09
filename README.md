@@ -76,7 +76,11 @@ Pi can use the `telegram_ask_user_question` tool to ask you a question with answ
 
 Pi can use the `telegram_send_widget` tool to send an interactive HTML widget into the topic (Bot API 10.4; Telegram 13.2+ or Desktop 7.4+). The HTML may be at most 32 KB, and at most 4 KB after compression. When you tap something in a widget that calls `TelegramWidget.request(data)`, the request reaches the session as a user message. Pi replies by updating the widget's state with `telegram_update_widget`, and the widget redraws in place. You don't get a new message.
 
-For now Telegram serves Bot API 10.4 only under `https://api.telegram.org/beta`, so TelegraPi polls updates and sends widgets through that path. If `/beta` answers 404, TelegraPi switches back to the normal URL for good. After three network or 5xx failures in a row, it uses the normal URL for 10 minutes. Either way your messages keep arriving, but widgets stop working until `/beta` is back. A custom `apiBaseUrl` is always used as is.
+Widgets and their interactions use the standard Bot API URL, just like ordinary messages. A self-hosted server must support Bot API 10.4; a custom `apiBaseUrl` is used as is. Telegram currently allows widgets only in private chats and prevents forwarding them, which matches TelegraPi's private-chat-only setup.
+
+Upgrading from the beta keeps the standard API's saved update offset separate from the retired beta queue. If the standard queue hasn't been read before, TelegraPi delivers its pending messages instead of discarding them. Existing questions and widget message IDs are preserved.
+
+Widget HTML runs without network access and uses a restricted HTML/CSS/JavaScript profile, not a full browser. See Telegram's [widget authoring guide](https://github.com/TelegramMessenger/widget-sandbox/blob/main/docs/widget-runtime-profile.md) for the supported features and `TelegramWidget` API.
 
 ### Pi commands
 

@@ -19,7 +19,7 @@ const { dashboardKeyboard, sendTopicChatAction, updateDashboard } = require("../
 const { questionKeyboard, toggleKeyboard, widgetQuestionCaption, widgetQuestionKeyboard } = require("../telegram/questions.cjs");
 const { AGENT_DIR } = require("../shared/paths.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
-const { richEnabled, telegramBetaCall, telegramCall, telegramFormattedCall, telegramRichCall } = require("../telegram/api.cjs");
+const { richEnabled, telegramCall, telegramFormattedCall, telegramRichCall } = require("../telegram/api.cjs");
 const {
   deliverPendingForSession,
   deliverPendingReply,
@@ -349,7 +349,7 @@ function handleWidgetQuestion(state, client, message) {
   const question = String(message.question || "Pi needs your input").slice(0, 3000);
   const multiSelect = message.multiSelect === true;
   trackTask(state, withTopicRetry(state, client.sessionId, client.cwd, client.sessionName, async (topic) => {
-    const sent = await telegramBetaCall(state.secret, "sendWidget", {
+    const sent = await telegramCall(state.secret, "sendWidget", {
       chat_id: state.secret.chatId,
       message_thread_id: topic.threadId,
       html,
@@ -407,7 +407,7 @@ function widgetState(message) {
 function handleWidget(state, client, message) {
   if (!(client.registered && typeof message.requestId === "string")) return;
   trackTask(state, withTopicRetry(state, client.sessionId, client.cwd, client.sessionName, async (topic) => {
-    const sent = await telegramBetaCall(state.secret, "sendWidget", {
+    const sent = await telegramCall(state.secret, "sendWidget", {
       chat_id: state.secret.chatId,
       message_thread_id: topic.threadId,
       html: String(message.html || ""),
@@ -434,7 +434,7 @@ function handleWidgetData(state, client, message) {
     sendFailure(client, message.requestId, `Widget ${message.messageId} was not sent by this session`);
     return;
   }
-  trackTask(state, telegramBetaCall(state.secret, "editMessageWidgetData", {
+  trackTask(state, telegramCall(state.secret, "editMessageWidgetData", {
     chat_id: state.secret.chatId,
     message_id: message.messageId,
     ...widgetState(message),

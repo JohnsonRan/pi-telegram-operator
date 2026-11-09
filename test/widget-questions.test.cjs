@@ -75,7 +75,7 @@ test("a widget question sends one widget message with the options as its keyboar
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(calls.length, 1);
-  assert.match(calls[0].url, /\/beta\/bot.+\/sendWidget$/);
+  assert.equal(calls[0].url, `https://api.telegram.org/bot${token}/sendWidget`);
   assert.equal(calls[0].body.chat_id, 42);
   assert.equal(calls[0].body.message_thread_id, 9);
   assert.equal(calls[0].body.html, "<html><body>pick</body></html>");
