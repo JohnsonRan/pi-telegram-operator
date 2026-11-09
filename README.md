@@ -131,7 +131,7 @@ These work in the bot's main chat view (outside any session topic) when wake mod
 | `/clone <repo-url> [name]` | Clone into `wakeDefaultCwd` and start a session there (`git clone <url>` also works) |
 | `/sessions` | List known sessions, with **Restore + recap** buttons |
 | `/status` | Show broker status |
-| `/update` | Run `pi update --all` (`pi update --all` also works) |
+| `/update` | Run `pi update --all`, then restart the background service (`pi update --all` also works) |
 | `/help` | Show this list |
 
 **Restore + recap** resumes a session and asks Pi for a short summary of where it left off. Telegram doesn't let bots switch your screen to a topic, so open the topic (marked unread) yourself.
@@ -148,12 +148,15 @@ node "$HOME/.pi/agent/git/github.com/JohnsonRan/pi-telegram-operator/service.cjs
 | --- | --- |
 | `install` | Register and start the service (reinstall after changing proxy settings) |
 | `start` / `stop` | Start or stop the service |
+| `restart` | Restart the installed service without closing Pi sessions |
 | `status` | Show service status and the log file path |
 | `uninstall` | Stop and remove the service; config and open Pi sessions are kept |
 
 The service is a per-user Scheduled Task (`PiTelegramOperator`) on Windows, a LaunchAgent on macOS, and a systemd user unit on Linux. Stopping or restarting it never closes Pi sessions it opened; they reconnect automatically.
 
-**After updating TelegraPi, restart the service** (`stop`, then `start`) so it loads the new code. Restart open Pi sessions too.
+**Telegram `/update` restarts the installed background service after a successful update.** Concurrent update requests are rejected while updating or restarting. The restart helper reports the result back to the chat; use `/status` to confirm the new broker is running. If the update fails, the service is left running.
+
+Updates run from a terminal still need `service.cjs restart`. Reload (`/reload`) or restart open Pi sessions to load updated extensions. An in-process fallback broker cannot restart independently: restart its host Pi process manually. The first upgrade to this behavior also needs a manual service restart.
 
 ## Configuration
 

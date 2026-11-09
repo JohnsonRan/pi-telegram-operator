@@ -264,18 +264,35 @@ async function handleControlMessage(state, message) {
   const parsed = parseControlCommand(message.text);
   const replyOptions = { replyTo: message.message_id, threadId: message.message_thread_id };
   if (updateCommand) {
-    await sendBrokerText(state, "Running pi update --all…", replyOptions);
-    const output = await (state.runPiUpdate || runPiUpdate)({
-      piCommand: state.secret.wakePiCommand,
-      piCommandArgs: state.secret.wakePiCommandArgs,
-      cwd: state.secret.wakeDefaultCwd || process.cwd(),
-    });
-    await sendBrokerText(state, [
-      "Pi update completed.",
-      ...(output ? ["", output] : []),
-      "",
-      "Restart running Pi sessions to load updated extensions.",
-    ].join("\n"), replyOptions);
+    if (state.updateInProgress) {
+      await sendBrokerText(state, "A Pi update or service restart is already in progress.", replyOptions);
+      return;
+    }
+    state.updateInProgress = true;
+    try {
+      await sendBrokerText(state, "Running pi update --all…", replyOptions);
+      const output = await (state.runPiUpdate || runPiUpdate)({
+        piCommand: state.secret.wakePiCommand,
+        piCommandArgs: state.secret.wakePiCommandArgs,
+        cwd: state.secret.wakeDefaultCwd || process.cwd(),
+      });
+      await sendBrokerText(state, [
+        "Pi update completed.",
+        ...(output ? ["", output] : []),
+        "",
+        state.restartService
+          ? "Restarting the TelegraPi service. Existing Pi sessions will reconnect automatically."
+          : "The broker is running inside Pi and cannot restart independently; restart its host Pi process manually.",
+        "Reload or restart running Pi sessions to load updated extensions.",
+      ].join("\n"), replyOptions);
+      if (state.restartService) {
+        // Do not replay /update after the service starts with the saved Telegram cursor.
+        await state.persistQueue;
+        await state.restartService({ replyOptions });
+      }
+    } finally {
+      state.updateInProgress = false;
+    }
     return;
   }
   if (cloneCommand) {

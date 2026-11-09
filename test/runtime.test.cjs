@@ -156,6 +156,7 @@ test("runs the exact Pi update command from All Topics", async () => {
   const originalFetch = global.fetch;
   const sent = [];
   const updateCalls = [];
+  const restarts = [];
   global.fetch = async (url, options) => {
     const method = url.split("/").pop();
     const body = JSON.parse(options.body);
@@ -177,6 +178,11 @@ test("runs the exact Pi update command from All Topics", async () => {
         updateCalls.push(options);
         return "Updated everything";
       },
+      persistQueue: Promise.resolve(),
+      restartService: async (options) => {
+        assert.equal(sent.length, 2, "announce the restart before the helper can stop this broker");
+        restarts.push(options);
+      },
     }, { message_id: 9, text: "pi update --all" });
   } finally {
     global.fetch = originalFetch;
@@ -185,6 +191,105 @@ test("runs the exact Pi update command from All Topics", async () => {
   assert.match(sent[0].text, /Running pi update --all/);
   assert.match(sent[1].text, /Pi update completed/);
   assert.match(sent[1].text, /Updated everything/);
+  assert.match(sent[1].text, /Restarting the TelegraPi service/);
+  assert.deepEqual(restarts, [{ replyOptions: { replyTo: 9, threadId: undefined } }]);
+});
+
+test("failed updates do not restart the service and release the update guard", async () => {
+  const originalFetch = global.fetch;
+  const sent = [];
+  global.fetch = async (_url, options) => {
+    sent.push(JSON.parse(options.body));
+    return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 1 } }) };
+  };
+  let restarts = 0;
+  const state = {
+    secret: { token: "fake", chatId: 42 },
+    runPiUpdate: async () => { throw new Error("update failed"); },
+    restartService: async () => { restarts += 1; },
+  };
+  try {
+    await assert.rejects(helpers.handleControlMessage(state, { message_id: 9, text: "/update" }), /update failed/);
+    assert.equal(restarts, 0);
+    assert.equal(state.updateInProgress, false);
+    assert.equal(sent.length, 1);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test("rejects concurrent update requests and persists before one service restart", async () => {
+  const originalFetch = global.fetch;
+  const sent = [];
+  global.fetch = async (_url, options) => {
+    sent.push(JSON.parse(options.body));
+    return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 1 } }) };
+  };
+  let releaseUpdate;
+  let releasePersist;
+  let releaseRestart;
+  let startedUpdate;
+  let startedRestart;
+  const updating = new Promise((resolve) => { startedUpdate = resolve; });
+  const restarting = new Promise((resolve) => { startedRestart = resolve; });
+  let updates = 0;
+  let restarts = 0;
+  const state = {
+    secret: { token: "fake", chatId: 42 },
+    runPiUpdate: async () => {
+      updates += 1;
+      startedUpdate();
+      return new Promise((resolve) => { releaseUpdate = resolve; });
+    },
+    persistQueue: new Promise((resolve) => { releasePersist = resolve; }),
+    restartService: async () => {
+      restarts += 1;
+      startedRestart();
+      return new Promise((resolve) => { releaseRestart = resolve; });
+    },
+  };
+  try {
+    const first = helpers.handleControlMessage(state, { message_id: 9, text: "/update" });
+    await updating;
+    await helpers.handleControlMessage(state, { message_id: 10, text: "/update" });
+    releaseUpdate("Updated");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(restarts, 0, "wait for the Telegram cursor to reach disk before restarting");
+    releasePersist();
+    await restarting;
+    await helpers.handleControlMessage(state, { message_id: 11, text: "/update" });
+    releaseRestart();
+    await first;
+    assert.equal(updates, 1);
+    assert.equal(restarts, 1);
+    assert.equal(sent.filter((item) => /already in progress/.test(item.text)).length, 2);
+    assert.equal(state.updateInProgress, false);
+  } finally {
+    releaseUpdate?.("");
+    releasePersist?.();
+    releaseRestart?.();
+    global.fetch = originalFetch;
+  }
+});
+
+test("in-process brokers leave restart manual and helper failures release the update guard", async () => {
+  const originalFetch = global.fetch;
+  const sent = [];
+  global.fetch = async (_url, options) => {
+    sent.push(JSON.parse(options.body));
+    return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: 1 } }) };
+  };
+  const state = { secret: { token: "fake", chatId: 42 }, runPiUpdate: async () => "Updated" };
+  try {
+    await helpers.handleControlMessage(state, { message_id: 9, text: "/update" });
+    assert.match(sent[1].text, /running inside Pi and cannot restart independently/);
+    assert.equal(state.updateInProgress, false);
+    state.restartService = async () => { throw new Error("cannot spawn helper"); };
+    await assert.rejects(helpers.handleControlMessage(state, { message_id: 10, text: "/update" }), /cannot spawn helper/);
+    assert.equal(state.updateInProgress, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 test("answers and applies authorized Telegram control callbacks", async () => {

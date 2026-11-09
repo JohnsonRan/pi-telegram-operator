@@ -4,7 +4,7 @@ const { execFileSync } = require("node:child_process");
 const { mkdirSync, renameSync, rmSync, writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { daemonLogPath } = require("./src/service/daemon-log.cjs");
+const { daemonLogPath, installDaemonLogging } = require("./src/service/daemon-log.cjs");
 const { errorMessage } = require("./src/shared/errors.cjs");
 const {
   AGENT_DIR,
@@ -172,6 +172,15 @@ function uninstallMac() {
 }
 
 function serviceAction(action) {
+  if (action === "restart") {
+    if (process.platform === "win32") {
+      // Do not stop a detached daemon unless there is an installed task to start again.
+      run("schtasks.exe", ["/Query", "/TN", WINDOWS_TASK], { capture: true });
+      return startWindows();
+    }
+    if (process.platform === "darwin") return startMac();
+    return run("systemctl", ["--user", "restart", SERVICE_NAME]);
+  }
   if (process.platform === "win32") {
     if (action === "install") return installWindows();
     if (action === "uninstall") return uninstallWindows();
@@ -193,22 +202,44 @@ function serviceAction(action) {
   throw new Error(`Unknown action: ${action}`);
 }
 
-if (require.main === module) {
+async function main() {
   const action = String(process.argv[2] || "status").toLowerCase();
-  if (!["install", "uninstall", "start", "stop", "status"].includes(action)) {
-    console.error("Usage: node service.cjs <install|uninstall|start|stop|status>");
-    process.exit(2);
+  if (!["install", "uninstall", "start", "stop", "restart", "status"].includes(action)) {
+    console.error("Usage: node service.cjs <install|uninstall|start|stop|restart|status>");
+    process.exitCode = 2;
+    return;
   }
 
+  let replyOptions;
+  const { reportServiceRestart } = require("./src/service/restart.cjs");
   try {
+    if (action === "restart" && process.argv[3] === "--notify") {
+      replyOptions = JSON.parse(process.argv[4]);
+      installDaemonLogging({ logPath: daemonLogPath(AGENT_DIR) });
+    }
     serviceAction(action);
     if (action === "install") console.log(`Installed and started ${SERVICE_NAME} for ${process.platform}.`);
     if (action === "status") console.log(`Daemon log: ${daemonLogPath(AGENT_DIR)}`);
     if (action === "uninstall") console.log(`Uninstalled ${SERVICE_NAME} for ${process.platform}.`);
+    if (action === "restart") console.log(`Restart requested for ${SERVICE_NAME}.`);
   } catch (error) {
     console.error(errorMessage(error));
-    process.exit(1);
+    if (replyOptions) {
+      await reportServiceRestart(`TelegraPi service restart failed: ${errorMessage(error)}\nCheck service.cjs status and the daemon log.`, replyOptions)
+        .catch((reportError) => console.error(errorMessage(reportError)));
+    }
+    process.exitCode = 1;
+    return;
+  }
+  if (replyOptions) {
+    await reportServiceRestart("TelegraPi service restart command completed. Use /status to confirm the broker is running. Existing Pi sessions reconnect automatically.", replyOptions)
+      .catch((error) => {
+        console.error(`Cannot report service restart: ${errorMessage(error)}`);
+        process.exitCode = 1;
+      });
   }
 }
 
-module.exports = Object.freeze({ WINDOWS_DAEMON_MARKER, launchAgent, proxyEnvironment, writePrivateFile, systemdUnit, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml });
+if (require.main === module) void main();
+
+module.exports = Object.freeze({ WINDOWS_DAEMON_MARKER, launchAgent, proxyEnvironment, serviceAction, writePrivateFile, systemdUnit, windowsDaemonStopScript, windowsTaskStopWaitScript, windowsTaskXml });

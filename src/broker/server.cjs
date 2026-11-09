@@ -32,6 +32,7 @@ const {
   __test: telegramRouterTest,
 } = require("../telegram/router.cjs");
 const { WakeLauncher } = require("../wake/launcher.cjs");
+const { restartService } = require("../service/restart.cjs");
 const { version: PACKAGE_VERSION } = require("../../package.json");
 
 const STATE_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -551,6 +552,9 @@ async function startLocalLeader(secret) {
   }
   const state = {
     secret,
+    // shortcut: embedded brokers need a host restart; add a handoff only if this fallback becomes common.
+    restartService: process.env.PI_TELEGRAM_DAEMON === "1" ? restartService : undefined,
+    updateInProgress: false,
     pid: process.pid,
     packageVersion: PACKAGE_VERSION,
     startedAt: Date.now(),
