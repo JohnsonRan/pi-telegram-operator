@@ -286,7 +286,9 @@ function handleReplyAck(state, client, message) {
 }
 
 function handleStreamDraft(state, client, message) {
-  trackTask(state, handleStreamRequest(state, client, message)).catch(warn("Draft stream failed"));
+  trackTask(state, handleStreamRequest(state, client, message)).catch((error) => {
+    if (!error.topicRetryPaused) warn("Draft stream failed")(error);
+  });
 }
 
 function handleStreamFinal(state, client, message) {
@@ -567,6 +569,9 @@ async function startLocalLeader(secret) {
     sessionCommands: new Map(stored.topics.map((item) => [item.sessionId, Array.isArray(item.commands) ? item.commands : []])),
     commandMenuSignature: undefined,
     topicPromises: new Map(),
+    topicCreationQueue: Promise.resolve(),
+    topicCreationRetryAt: 0,
+    topicCreationError: undefined,
     streamQueues: new Map(),
     dashboardQueues: new Map(),
     chatActionSentAt: new Map(),

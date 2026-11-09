@@ -214,6 +214,7 @@ Set these wherever Pi and setup are started. For the background service:
 | Problem | What to check |
 | --- | --- |
 | No topic appears | Did you restart Pi after setup? Is Threaded Mode enabled in BotFather? |
+| `BOT_TOPIC_WRONG_HOME` or repeated topic creation | Telegram can fail to create usable private-chat topics ([upstream report](https://github.com/tdlib/telegram-bot-api/issues/944)). After a creation failure, TelegraPi pauses new topic creation for 5 minutes; it also waits 5 minutes before replacing a newly created topic. Healthy existing topics still work. Failed replacements keep the old mapping. Retry your message after the pause; unsent output is not replayed automatically. |
 | "No active Pi session is available" | You wrote in All Topics without wake mode. Reply inside a session topic instead. |
 | Replies say "queued until the target Pi session reconnects" | That session isn't running. Open it in Pi, or enable wake mode. |
 | Every notification arrives twice | If you use `pi-notify`, remove its Telegram command action. TelegraPi already reads its notifications. |

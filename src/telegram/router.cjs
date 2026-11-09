@@ -18,6 +18,7 @@ const WAKE_REGISTRATION_TIMEOUT_MS = 15_000;
 const WAKE_STOP_TIMEOUT_MS = 5_000;
 const WAKE_STABILITY_TIMEOUT_MS = 1_500;
 const MAX_UPDATE_ATTEMPTS = 3;
+const TOPIC_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 
 function knownOffset(state) {
   const stored = state.offsets?.plain;
@@ -35,18 +36,32 @@ function pollPayload(state) {
   };
 }
 
-async function ensureTopic(state, sessionId, cwd, sessionName) {
+async function ensureTopic(state, sessionId, cwd, sessionName, staleTopic) {
   const existing = state.topics.get(sessionId);
-  if (existing) return existing;
+  if (existing && existing !== staleTopic) return existing;
   const inflight = state.topicPromises.get(sessionId);
   if (inflight) return inflight;
 
-  const promise = (async () => {
-    if (state.topics.size >= MAX_TOPICS) throw new Error(`Telegram topic limit reached (${MAX_TOPICS})`);
-    const created = await telegramCall(state.secret, "createForumTopic", {
-      chat_id: state.secret.chatId,
-      name: topicName(sessionId, cwd, sessionName),
-    });
+  // Serialize across sessions so one failure pauses queued creations too.
+  const promise = (state.topicCreationQueue || Promise.resolve()).catch(() => {}).then(async () => {
+    if (Date.now() < state.topicCreationRetryAt) {
+      const seconds = Math.ceil((state.topicCreationRetryAt - Date.now()) / 1000);
+      throw Object.assign(new Error(`Telegram topic creation paused; retry in ${seconds}s: ${errorMessage(state.topicCreationError)}`), {
+        topicRetryPaused: true,
+      });
+    }
+    if (!existing && state.topics.size >= MAX_TOPICS) throw new Error(`Telegram topic limit reached (${MAX_TOPICS})`);
+    let created;
+    try {
+      created = await telegramCall(state.secret, "createForumTopic", {
+        chat_id: state.secret.chatId,
+        name: topicName(sessionId, cwd, sessionName),
+      });
+    } catch (error) {
+      state.topicCreationRetryAt = Date.now() + TOPIC_RETRY_COOLDOWN_MS;
+      state.topicCreationError = error;
+      throw error;
+    }
     const topic = {
       sessionId,
       threadId: created.message_thread_id,
@@ -60,7 +75,8 @@ async function ensureTopic(state, sessionId, cwd, sessionName) {
     updateDashboard(state, topic, { phase: "Waiting", detail: "Session topic created" });
     syncTelegramCommandMenu(state).catch(warn("Cannot sync bot commands"));
     return topic;
-  })().finally(() => state.topicPromises.delete(sessionId));
+  }).finally(() => state.topicPromises.delete(sessionId));
+  state.topicCreationQueue = promise;
   state.topicPromises.set(sessionId, promise);
   return promise;
 }
@@ -75,9 +91,9 @@ async function withTopicRetry(state, sessionId, cwd, sessionName, operation) {
     return await operation(topic);
   } catch (error) {
     if (!isStaleTopicError(error)) throw error;
-    state.topics.delete(sessionId);
-    await queuePersist(state);
-    topic = await ensureTopic(state, sessionId, cwd, sessionName);
+    // A server outage can make even brand-new topics unwritable; do not keep replacing them.
+    if (Date.now() - topic.createdAt < TOPIC_RETRY_COOLDOWN_MS) throw error;
+    topic = await ensureTopic(state, sessionId, cwd, sessionName, topic);
     return operation(topic);
   }
 }
