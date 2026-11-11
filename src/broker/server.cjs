@@ -369,6 +369,7 @@ function handleWidgetQuestion(state, client, message) {
       messageId: sent.message_id,
       question,
       options,
+      widget: true,
       ...(multiSelect ? { multiSelect: true, selected: [] } : {}),
       createdAt: Date.now(),
     });

@@ -6,7 +6,7 @@ const { MAX_PENDING_REPLIES, MAX_TOPICS, pruneExpiredBrokerState, queuePersist }
 const { CONTROL_COMMANDS, CONTROL_PANEL_COMMANDS, RESTORE_CONTEXT_PROMPT, controlPanel, parseControlCallback, parseRestoreCallback, topicName, translateTelegramCommand } = require("./control.cjs");
 const { attachmentFromMessage, downloadTelegramAttachment } = require("./files.cjs");
 const { parseSessionAction, sendTopicChatAction, syncTopicDashboard, updateDashboard } = require("./dashboard.cjs");
-const { parseQuestionCallback, parseQuestionDoneCallback, parseToggleCallback, toggleKeyboard } = require("./questions.cjs");
+const { answeredKeyboard, parseQuestionCallback, parseQuestionDoneCallback, parseToggleCallback, toggleKeyboard } = require("./questions.cjs");
 const { cloneRepository, parseGitCloneCommand } = require("./git-clone.cjs");
 const { parsePiUpdateCommand, runPiUpdate } = require("./pi-update.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
@@ -599,6 +599,10 @@ function deliverQuestionAnswerToClient(state, question, answer) {
 // Replace the buttons with the answer, so an already-answered question cannot be tapped again.
 async function settleQuestionMessage(state, question, answer) {
   const edited = { chat_id: state.secret.chatId, message_id: question.messageId };
+  if (question.widget) {
+    await telegramCall(state.secret, "editMessageReplyMarkup", { ...edited, reply_markup: answeredKeyboard(answer) }).catch(() => {});
+    return;
+  }
   await telegramRichCall(state.secret, "editMessageText", {
     ...edited,
     rich_message: { markdown: prepareRichMarkdown(`${question.question}\n\n**Selected:** ${escapeMarkdown(answer)}`) },

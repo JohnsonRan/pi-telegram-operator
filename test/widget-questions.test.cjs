@@ -90,6 +90,7 @@ test("a widget question sends one widget message with the options as its keyboar
   assert.equal(pending.question, "Which deploy?");
   assert.deepEqual(pending.options, ["Staging", "Production", "Cancel"]);
   assert.equal(pending.messageId, 555);
+  assert.equal(pending.widget, true);
   assert.deepEqual(state.topics.get("session").widgetIds, [555]);
   // Like a plain question, the request stays open until the user picks; no result is sent yet.
   assert.equal(written.filter((line) => line.type === "result").length, 0);
@@ -121,6 +122,21 @@ test("a widget question keeps the caption readable and its keyboard within ten o
   assert.deepEqual(keyboard.inline_keyboard.map((row) => row.length), [2, 2, 2, 2, 2]);
   assert.deepEqual(parseQuestionCallback(keyboard.inline_keyboard[4][1].callback_data), { questionId, optionIndex: 9 });
   assert.match(widgetQuestionCaption("Pick one", options), /\n\n1\. a[\s\S]*\n10\. j$/);
+});
+
+test("an answered widget question swaps its options for one inert answer button", async (t) => {
+  const calls = mockWidget(t);
+  const { __test: router } = require("../src/telegram/router.cjs");
+  const state = toggleState({ widget: true, multiSelect: undefined, selected: undefined });
+  const opts = { queuePersist: async () => {}, deliverQuestionAnswer: () => true, syncTopicDashboard: async () => {} };
+  await router.handleCallbackQuery(state, {
+    id: "cb", data: `question:${questionId}:1`, from: { id: 7 }, message: { message_id: 90, chat: { id: 42 } },
+  }, opts);
+  // A widget message has no text, so editMessageText would fail and leave the buttons tappable.
+  assert.equal(calls.some((call) => call.url.endsWith("/editMessageText")), false);
+  const edit = calls.find((call) => call.url.endsWith("/editMessageReplyMarkup"));
+  assert.equal(edit.body.message_id, 90);
+  assert.deepEqual(edit.body.reply_markup, { inline_keyboard: [[{ text: "✓ test", disabled: {} }]] });
 });
 
 test("the client asks the broker for a widget question with the widget attached", async () => {

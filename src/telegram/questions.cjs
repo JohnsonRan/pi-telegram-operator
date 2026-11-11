@@ -75,6 +75,12 @@ function widgetQuestionKeyboard(questionId, options) {
   return { inline_keyboard: rows };
 }
 
+// A widget message has no text to rewrite, so an answered widget question swaps its options for
+// one inert button that shows the answer (DisabledButton, Bot API 10.3; widgets need 10.4).
+function answeredKeyboard(answer) {
+  return { inline_keyboard: [[{ text: buttonText(answer, true), disabled: {} }]] };
+}
+
 // The caption is the widget's fallback (chat list, forwards, clients without widgets), so it
 // repeats the options; the buttons below the widget stay tappable either way.
 function widgetQuestionCaption(question, options) {
@@ -83,6 +89,7 @@ function widgetQuestionCaption(question, options) {
 }
 
 module.exports = Object.freeze({
+  answeredKeyboard,
   parseQuestionCallback,
   parseQuestionDoneCallback,
   parseToggleCallback,
