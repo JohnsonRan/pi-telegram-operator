@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { mkdtemp, readdir, rm, writeFile } = require("node:fs/promises");
+const { mkdtemp, readdir, readFile, rm, writeFile } = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
@@ -65,7 +65,6 @@ test("persists and reads only the canonical broker state", async () => {
   try {
     const state = {
       offset: 12,
-      offsets: { plain: 12, beta: 900 },
       mappings: new Map(),
       pendingReplies: new Map(),
       pendingQuestions: new Map(),
@@ -75,20 +74,24 @@ test("persists and reads only the canonical broker state", async () => {
     assert.deepEqual(await readdir(paths.directory), ["pi-telegram-operator.state.json"]);
     const stored = await readBrokerState(paths.statePath);
     assert.equal(stored.offset, 12);
-    assert.deepEqual(stored.offsets, { plain: 12, beta: 900 });
+    assert.equal(JSON.parse(await readFile(paths.statePath, "utf8")).offsets, undefined);
   } finally {
     await rm(paths.directory, { recursive: true, force: true });
   }
 });
 
-test("migrates a legacy single offset to the plain queue, not to beta", async () => {
+test("reads only the plain queue's offset from /beta-era state", async () => {
   const paths = await temporaryPaths();
   try {
-    // Written by a version that polled only one queue with one offset.
-    await writeFile(paths.statePath, JSON.stringify({ offset: 514084770, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] }));
-    const stored = await readBrokerState(paths.statePath);
-    assert.equal(stored.offsets.plain, 514084770);
-    assert.equal(stored.offsets.beta, undefined);
+    for (const [raw, expected] of [
+      [{ offset: 514084770 }, 514084770],
+      [{ offset: 9002, offsets: { plain: 12, beta: 9002 } }, 12],
+      // The top-level offset may be a /beta id here; read the plain queue from its start instead.
+      [{ offset: 9002, offsets: { beta: 9002 } }, 0],
+    ]) {
+      await writeFile(paths.statePath, JSON.stringify(raw));
+      assert.equal((await readBrokerState(paths.statePath)).offset, expected);
+    }
   } finally {
     await rm(paths.directory, { recursive: true, force: true });
   }

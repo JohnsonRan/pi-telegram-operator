@@ -15,7 +15,7 @@ const secret = { botToken: token, chatId: 42, allowedUserId: 7 };
 
 test.after(() => fs.rmSync(agentDir, { recursive: true, force: true }));
 
-test("stable polling resumes only the plain queue's persisted offset", async (t) => {
+test("polling resumes the persisted offset, never a /beta one", async (t) => {
   for (const [name, stored, expected] of [
     ["both queues", { offset: 12, offsets: { plain: 12, beta: 9002 } }, 12],
     ["only beta", { offset: 9002, offsets: { beta: 9002 } }, 0],
@@ -46,7 +46,7 @@ test("stable polling resumes only the plain queue's persisted offset", async (t)
 });
 
 test("stable polling keeps a custom API base URL unchanged", async (t) => {
-  const state = { secret: { ...secret, apiBaseUrl: "http://localhost:8081/custom" }, offsets: { plain: 5, beta: 9002 } };
+  const state = { secret: { ...secret, apiBaseUrl: "http://localhost:8081/custom" }, offset: 5 };
   let called;
   t.mock.method(global, "fetch", async (url, init) => {
     called = { url: String(url), body: JSON.parse(init.body) };
@@ -58,8 +58,8 @@ test("stable polling keeps a custom API base URL unchanged", async (t) => {
   assert.equal(called.body.offset, 5);
 });
 
-test("stable updates advance only the plain offset and never move it backwards", async () => {
-  const state = { offset: 500, offsets: { plain: 500, beta: 9002 } };
+test("updates advance the offset and never move it backwards", async () => {
+  const state = { offset: 500 };
   const handled = [];
   const options = {
     handleTelegramMessage: async (_state, message) => handled.push(message.text),
@@ -70,22 +70,19 @@ test("stable updates advance only the plain offset and never move it backwards",
   await router.processTelegramUpdate(state, { update_id: 500, message: { text: "older update" } }, options);
 
   assert.deepEqual(handled, ["pending on stable", "older update"]);
-  assert.deepEqual(state.offsets, { plain: 502, beta: 9002 });
   assert.equal(state.offset, 502);
 });
 
-test("widget_query updates are dispatched before the stable offset is persisted", async () => {
-  const state = { offsets: { beta: 9002 } };
+test("widget_query updates are dispatched before the offset is persisted", async () => {
+  const state = {};
   const query = { id: "q", type: { type: "data" }, data: "refresh" };
   const handled = [];
   await router.processTelegramUpdate(state, { update_id: 7, widget_query: query }, {
     handleWidgetQuery: async (_state, received) => {
-      assert.equal(state.offsets.plain, undefined);
+      assert.equal(state.offset, undefined);
       handled.push(received);
     },
-    queuePersist: async () => { assert.equal(state.offsets.plain, 8); },
+    queuePersist: async () => { assert.equal(state.offset, 8); },
   });
   assert.deepEqual(handled, [query]);
-  assert.equal(state.offset, 8);
-  assert.equal(state.offsets.beta, 9002);
 });

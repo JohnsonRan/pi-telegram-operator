@@ -11,14 +11,10 @@ const STATE_ENTRY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 async function readBrokerState(statePath = STATE_PATH) {
   try {
     const raw = JSON.parse(await readFile(statePath, "utf8"));
-    const offset = Number.isSafeInteger(raw?.offset) && raw.offset >= 0 ? raw.offset : 0;
-    // Keep historical offsets, but polling now uses only plain; /beta had unrelated update ids.
-    // Legacy single offsets still migrate to plain when no per-queue record exists.
-    const offsets = {};
-    for (const [key, value] of Object.entries(raw?.offsets && typeof raw.offsets === "object" ? raw.offsets : {})) {
-      if (Number.isSafeInteger(value) && value >= 0) offsets[key] = value;
-    }
-    if (offsets.plain === undefined && raw?.offsets === undefined && offset > 0) offsets.plain = offset;
+    // Files from the /beta period keep per-queue offsets; only their plain one is trusted, since
+    // the top-level offset there may hold an id from /beta's unrelated queue.
+    const stored = raw?.offsets && typeof raw.offsets === "object" ? raw.offsets.plain : raw?.offset;
+    const offset = Number.isSafeInteger(stored) && stored >= 0 ? stored : 0;
     const mappings = Array.isArray(raw?.mappings)
       ? raw.mappings
           .filter((item) => item && Number.isSafeInteger(item.messageId) && Number.isSafeInteger(item.threadId) && typeof item.sessionId === "string")
@@ -33,9 +29,9 @@ async function readBrokerState(statePath = STATE_PATH) {
     const topics = Array.isArray(raw?.topics)
       ? raw.topics.filter((item) => item && typeof item.sessionId === "string" && Number.isSafeInteger(item.threadId)).slice(-MAX_TOPICS)
       : [];
-    return { offset, offsets, mappings, pendingReplies, pendingQuestions, topics };
+    return { offset, mappings, pendingReplies, pendingQuestions, topics };
   } catch (error) {
-    if (error?.code === "ENOENT") return { offset: 0, offsets: {}, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] };
+    if (error?.code === "ENOENT") return { offset: 0, mappings: [], pendingReplies: [], pendingQuestions: [], topics: [] };
     if (error instanceof SyntaxError) throw new Error(`Telegram state contains invalid JSON: ${statePath}`, { cause: error });
     throw error;
   }
@@ -58,8 +54,7 @@ async function persistBrokerState(state, statePath = STATE_PATH) {
     .map(({ retryTimer: _retryTimer, ...item }) => item);
   const pendingQuestions = [...(state.pendingQuestions?.values?.() || [])].slice(-MAX_PENDING_QUESTIONS);
   const topics = [...state.topics.values()].slice(-MAX_TOPICS);
-  const offsets = { ...(state.offsets || {}) };
-  const content = `${JSON.stringify({ offset: state.offset, offsets, mappings, pendingReplies, pendingQuestions, topics }, null, 2)}\n`;
+  const content = `${JSON.stringify({ offset: state.offset, mappings, pendingReplies, pendingQuestions, topics }, null, 2)}\n`;
   await writeStateFile(statePath, content);
 }
 

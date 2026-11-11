@@ -562,7 +562,6 @@ async function startLocalLeader(secret) {
     packageVersion: PACKAGE_VERSION,
     startedAt: Date.now(),
     offset: stored.offset,
-    offsets: { ...stored.offsets },
     mappings: new Map(stored.mappings.map((item) => [item.messageId, item])),
     pendingReplies: new Map(stored.pendingReplies.map((item) => [item.deliveryId, item])),
     pendingQuestions: new Map(stored.pendingQuestions.map((item) => [item.questionId, item])),

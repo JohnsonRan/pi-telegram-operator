@@ -20,16 +20,9 @@ const WAKE_STABILITY_TIMEOUT_MS = 1_500;
 const MAX_UPDATE_ATTEMPTS = 3;
 const TOPIC_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 
-function knownOffset(state) {
-  const stored = state.offsets?.plain;
-  return Number.isSafeInteger(stored) && stored >= 0 ? stored : undefined;
-}
-
-// The retired /beta queue had unrelated update ids. Resume only the plain queue's offset,
-// or read from 0 so pending messages are delivered rather than silently discarded.
 function pollPayload(state) {
   return {
-    offset: knownOffset(state) ?? 0,
+    offset: state.offset || 0,
     limit: 100,
     timeout: 25,
     allowed_updates: ["message", "callback_query", "stopped_message_generation", "widget_query"],
@@ -789,10 +782,7 @@ async function processTelegramUpdate(state, update, options = {}) {
     warn(`Skipping Telegram update ${update.update_id} after ${MAX_UPDATE_ATTEMPTS} failures`)(error);
   }
   state.failedUpdate = undefined;
-  state.offsets = state.offsets || {};
-  state.offsets.plain = Math.max(knownOffset(state) ?? 0, update.update_id + 1);
-  // `offset` mirrors the plain queue for state written by older versions.
-  state.offset = state.offsets.plain;
+  state.offset = Math.max(state.offset || 0, update.update_id + 1);
   await (options.queuePersist || queuePersist)(state);
   return true;
 }
