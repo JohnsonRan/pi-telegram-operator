@@ -264,6 +264,22 @@ function handleQuestionAck(state, client, message) {
   }
 }
 
+// Pi stopped waiting (its turn was aborted). Withdraw the buttons so neither a tap nor a typed
+// answer is taken for a question nobody reads any more.
+function handleQuestionCancel(state, client, message) {
+  if (!(client.registered && typeof message.requestId === "string")) return;
+  for (const [questionId, question] of state.pendingQuestions) {
+    if (question.requestId !== message.requestId || question.sessionId !== client.sessionId) continue;
+    state.pendingQuestions.delete(questionId);
+    queuePersist(state).catch(warn("Cannot persist question cancel"));
+    telegramCall(state.secret, "editMessageReplyMarkup", {
+      chat_id: state.secret.chatId,
+      message_id: question.messageId,
+      reply_markup: { inline_keyboard: [] },
+    }).catch(() => {});
+  }
+}
+
 function handleReplyAck(state, client, message) {
   if (!(client.registered && typeof message.deliveryId === "string")) return;
   const pending = state.pendingReplies.get(message.deliveryId);
@@ -463,6 +479,7 @@ function handleNotify(state, client, message) {
 const BROKER_HANDLERS = new Map(Object.entries({
   register: handleRegister,
   questionAck: handleQuestionAck,
+  questionCancel: handleQuestionCancel,
   replyAck: handleReplyAck,
   streamDraft: handleStreamDraft,
   streamFinal: handleStreamFinal,

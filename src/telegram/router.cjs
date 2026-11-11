@@ -6,7 +6,14 @@ const { MAX_PENDING_REPLIES, MAX_TOPICS, pruneExpiredBrokerState, queuePersist }
 const { CONTROL_COMMANDS, CONTROL_PANEL_COMMANDS, RESTORE_CONTEXT_PROMPT, controlPanel, parseControlCallback, parseRestoreCallback, topicName, translateTelegramCommand } = require("./control.cjs");
 const { attachmentFromMessage, downloadTelegramAttachment } = require("./files.cjs");
 const { parseSessionAction, sendTopicChatAction, syncTopicDashboard, updateDashboard } = require("./dashboard.cjs");
-const { answeredKeyboard, parseQuestionCallback, parseQuestionDoneCallback, parseToggleCallback, toggleKeyboard } = require("./questions.cjs");
+const {
+  answeredKeyboard,
+  parseQuestionCallback,
+  parseQuestionCustomCallback,
+  parseQuestionDoneCallback,
+  parseToggleCallback,
+  toggleKeyboard,
+} = require("./questions.cjs");
 const { cloneRepository, parseGitCloneCommand } = require("./git-clone.cjs");
 const { parsePiUpdateCommand, runPiUpdate } = require("./pi-update.cjs");
 const { errorMessage, warn } = require("../shared/errors.cjs");
@@ -435,6 +442,13 @@ async function handleTelegramMessage(state, message) {
     return;
   }
 
+  // After "Type my own answer", the next text in that topic answers the question.
+  const awaiting = !attachment && topicForThread ? questionAwaitingText(state, topicForThread.sessionId) : undefined;
+  if (awaiting) {
+    await answerQuestionWithText(state, awaiting, message, replyOptions);
+    return;
+  }
+
   const target = findReplyTarget(state, message);
   if (!target) {
     await sendBrokerText(state, "No active Pi session is available for this topic.", replyOptions)
@@ -606,6 +620,40 @@ async function settleQuestionMessage(state, question, answer) {
   })).catch(() => {});
 }
 
+// Records an answer and hands it to the session that asked. False means Pi is disconnected; the
+// broker keeps the answer and replays it when the session registers again.
+async function submitQuestionAnswer(state, question, answer, options = {}) {
+  question.answer = answer;
+  question.answeredAt = Date.now();
+  delete question.awaitingText;
+  await (options.queuePersist || queuePersist)(state);
+  return (options.deliverQuestionAnswer || deliverQuestionAnswerToClient)(state, question, answer);
+}
+
+async function finishQuestion(state, question, answer, options = {}) {
+  await settleQuestionMessage(state, question, answer);
+  const topic = state.topics.get(question.sessionId);
+  if (topic) await (options.syncTopicDashboard || syncTopicDashboard)(state, topic, { phase: "Answer sent", detail: answer })
+    .then(() => (options.queuePersist || queuePersist)(state)).catch(() => {});
+}
+
+function questionAwaitingText(state, sessionId) {
+  return [...(state.pendingQuestions?.values() || [])].reverse()
+    .find((question) => question.awaitingText && question.sessionId === sessionId && question.answer === undefined);
+}
+
+// A typed answer joins the options already ticked on a multi-select question.
+async function answerQuestionWithText(state, question, message, replyOptions, options = {}) {
+  const answer = [selectedAnswerText(question), message.text.trim()].filter(Boolean).join(", ");
+  const delivered = await submitQuestionAnswer(state, question, answer, options);
+  acknowledgeTelegramMessage(state, message).catch(() => {});
+  if (!delivered) {
+    await sendBrokerText(state, "Pi is disconnected. This answer will be delivered when Pi reconnects.", replyOptions).catch(() => {});
+    return;
+  }
+  await finishQuestion(state, question, answer, options);
+}
+
 async function handleCallbackQuery(state, query, options = {}) {
   if (!query || typeof query.id !== "string") return;
   const authorized = query.message?.chat?.id === state.secret.chatId && query.from?.id === state.secret.allowedUserId;
@@ -613,16 +661,17 @@ async function handleCallbackQuery(state, query, options = {}) {
   const questionAction = authorized ? parseQuestionCallback(query.data) : undefined;
   const toggleAction = authorized ? parseToggleCallback(query.data) : undefined;
   const doneAction = authorized ? parseQuestionDoneCallback(query.data) : undefined;
+  const customAction = authorized ? parseQuestionCustomCallback(query.data) : undefined;
   const pendingQuestion = questionAction
     ? state.pendingQuestions?.get(questionAction.questionId)
-    : state.pendingQuestions?.get((toggleAction || doneAction)?.questionId);
+    : state.pendingQuestions?.get((toggleAction || doneAction || customAction)?.questionId);
   // A toggle only flips a checkbox; Done is what answers a multi-select question.
   const selectedAnswer = pendingQuestion && questionAction ? pendingQuestion.options?.[questionAction.optionIndex] : undefined;
   const sessionAction = authorized ? parseSessionAction(query.data) : undefined;
   const actionTopic = sessionAction ? state.topics.get(sessionAction.sessionId) : undefined;
   const restoreSessionId = authorized ? parseRestoreCallback(query.data) : undefined;
   const restoreTopic = restoreSessionId ? state.topics.get(restoreSessionId) : undefined;
-  if (!selectedAnswer && !toggleAction && !doneAction) {
+  if (!selectedAnswer && !toggleAction && !doneAction && !customAction) {
     await answerCallback(state, query, !authorized
       ? "Not allowed."
       : (restoreTopic
@@ -630,6 +679,23 @@ async function handleCallbackQuery(state, query, options = {}) {
         : (authorized && !command && !actionTopic ? "This button is no longer available." : "")), true);
   }
   if (!authorized) return;
+
+  // Only one question per session waits for typed text, so the next message has one meaning.
+  if (customAction) {
+    if (!pendingQuestion || pendingQuestion.answer !== undefined) {
+      await answerCallback(state, query, "This question is no longer available.", true);
+      return;
+    }
+    for (const question of state.pendingQuestions.values()) {
+      if (question.sessionId === pendingQuestion.sessionId) delete question.awaitingText;
+    }
+    pendingQuestion.awaitingText = true;
+    await (options.queuePersist || queuePersist)(state);
+    await answerCallback(state, query, "Send your answer as a message in this topic.", true);
+    const topic = state.topics.get(pendingQuestion.sessionId);
+    if (topic) await updateDashboard(state, topic, { phase: "Waiting for answer", detail: "Type your answer in this topic" }).catch(() => {});
+    return;
+  }
 
   // A toggle redraws the keyboard and waits; nothing reaches Pi until Done.
   if (toggleAction || doneAction) {
@@ -666,35 +732,23 @@ async function handleCallbackQuery(state, query, options = {}) {
       await answerCallback(state, query, "Select at least one option first.", true);
       return;
     }
-    pendingQuestion.answer = answer;
-    pendingQuestion.answeredAt = Date.now();
-    await (options.queuePersist || queuePersist)(state);
-    const delivered = (options.deliverQuestionAnswer || deliverQuestionAnswerToClient)(state, pendingQuestion, answer);
-    if (!delivered) {
+    if (!await submitQuestionAnswer(state, pendingQuestion, answer, options)) {
       await answerCallback(state, query, "Pi is disconnected. This answer will be delivered when Pi reconnects.", true);
       return;
     }
     await answerCallback(state, query, `Selected: ${answer.slice(0, 150)}`);
-    await settleQuestionMessage(state, pendingQuestion, answer);
-    if (topic) await (options.syncTopicDashboard || syncTopicDashboard)(state, topic, { phase: "Answer sent", detail: answer })
-      .then(() => (options.queuePersist || queuePersist)(state)).catch(() => {});
+    await finishQuestion(state, pendingQuestion, answer, options);
     return;
   }
 
   if (selectedAnswer && pendingQuestion) {
-    pendingQuestion.answer = String(selectedAnswer);
-    pendingQuestion.answeredAt = Date.now();
-    await (options.queuePersist || queuePersist)(state);
-    const delivered = (options.deliverQuestionAnswer || deliverQuestionAnswerToClient)(state, pendingQuestion, selectedAnswer);
-    if (!delivered) {
+    const answer = String(selectedAnswer);
+    if (!await submitQuestionAnswer(state, pendingQuestion, answer, options)) {
       await answerCallback(state, query, "Pi is disconnected. This answer will be delivered when Pi reconnects.", true);
       return;
     }
-    await answerCallback(state, query, `Selected: ${String(selectedAnswer).slice(0, 150)}`);
-    await settleQuestionMessage(state, pendingQuestion, selectedAnswer);
-    const topic = state.topics.get(pendingQuestion.sessionId);
-    if (topic) await (options.syncTopicDashboard || syncTopicDashboard)(state, topic, { phase: "Answer sent", detail: String(selectedAnswer) })
-      .then(() => (options.queuePersist || queuePersist)(state)).catch(() => {});
+    await answerCallback(state, query, `Selected: ${answer.slice(0, 150)}`);
+    await finishQuestion(state, pendingQuestion, answer, options);
     return;
   }
 

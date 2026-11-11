@@ -129,6 +129,7 @@ export default function telegraPi(pi: ExtensionAPI): void {
       "Pass `widget` (a self-contained HTML document, same limits and API as telegram_send_widget) to draw the question as a widget: it arrives as one widget message with your options as the inline keyboard under it, and the widget itself is where you show the choice, a preview or a comparison. The bot buttons below the widget answer the question; a widget that calls TelegramWidget.request() instead reaches Pi as a separate user message, which is not an answer.",
       "Without `widget` the question is a chat text message with one button per option, which every client shows.",
       "Set `multiSelect` to let the user tick several options: each tap toggles a ✓ and nothing is returned until Done is pressed. The answer joins the chosen options with \", \".",
+      "Every question also has a 'Type my own answer' button: the user's next message in the topic becomes the answer (after any ticked options), so the answer is not always one of the options.",
     ].join(" "),
     promptSnippet: "Ask the remote user a multiple-choice question through Telegram and wait for the answer.",
     parameters: Type.Object({
@@ -140,7 +141,7 @@ export default function telegraPi(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const answer = await runtime.askWidgetQuestion(pi, ctx, params.question, params.options, params.widget, signal, params.multiSelect === true);
       return {
-        content: [{ type: "text", text: `The user selected: ${answer}` }],
+        content: [{ type: "text", text: `The user answered: ${answer}` }],
         details: { question: params.question, answer },
       };
     },

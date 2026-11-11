@@ -353,7 +353,13 @@ async function requestBroker(state, payload, timeoutLabel, timeoutMs = REQUEST_T
       signal?.removeEventListener("abort", onAbort);
       callback(value);
     };
-    const onAbort = settle(() => reject(signal.reason));
+    const onAbort = settle(() => {
+      // A durable question outlives reconnects; tell the broker Pi has stopped waiting for it.
+      if (durable && state.socket && !state.socket.destroyed) {
+        sendLine(state.socket, { type: "questionCancel", auth: state.secret.bridgeSecret, sessionId: state.sessionId, requestId });
+      }
+      reject(signal.reason);
+    });
     const timer = setTimeout(settle(() => reject(new Error(`${timeoutLabel} timed out`))), timeoutMs);
     timer.unref?.();
     signal?.addEventListener("abort", onAbort, { once: true });

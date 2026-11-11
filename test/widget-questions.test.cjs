@@ -82,8 +82,9 @@ test("a widget question sends one widget message with the options as its keyboar
   assert.equal(calls[0].body.allow_queries, true);
   assert.match(calls[0].body.caption, /Which deploy\?/);
   assert.match(calls[0].body.caption, /2\. Production/);
-  assert.equal(calls[0].body.reply_markup.inline_keyboard.length, 2);
+  assert.equal(calls[0].body.reply_markup.inline_keyboard.length, 3);
   assert.deepEqual(calls[0].body.reply_markup.inline_keyboard[0].map((button) => button.text), ["Staging", "Production"]);
+  assert.equal(calls[0].body.reply_markup.inline_keyboard[2][0].callback_data, `qcustom:${[...state.pendingQuestions.keys()][0]}`);
 
   // The options answer through the plain question path; the widget id is remembered for taps.
   const [pending] = state.pendingQuestions.values();
@@ -119,7 +120,7 @@ test("a widget question without a widget or options fails instead of sending hal
 test("a widget question keeps the caption readable and its keyboard within ten options", () => {
   const options = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
   const keyboard = widgetQuestionKeyboard(questionId, options);
-  assert.deepEqual(keyboard.inline_keyboard.map((row) => row.length), [2, 2, 2, 2, 2]);
+  assert.deepEqual(keyboard.inline_keyboard.map((row) => row.length), [2, 2, 2, 2, 2, 1]);
   assert.deepEqual(parseQuestionCallback(keyboard.inline_keyboard[4][1].callback_data), { questionId, optionIndex: 9 });
   assert.match(widgetQuestionCaption("Pick one", options), /\n\n1\. a[\s\S]*\n10\. j$/);
   // sendWidget refuses captions over 1024 characters; the question gives way to the options.
@@ -210,7 +211,7 @@ test("a multi-select question toggles options without answering until Done", asy
   assert.equal(calls.filter((call) => call.url.endsWith("/editMessageReplyMarkup")).length, 3);
   const redraw = calls.filter((call) => call.url.endsWith("/editMessageReplyMarkup")).at(-1).body.reply_markup.inline_keyboard;
   assert.equal(redraw[1][0].text, "✓ test");
-  assert.equal(redraw[3][0].text, "Done (1)");
+  assert.equal(redraw[4][0].text, "Done (1)");
 
   // Done answers with the selected labels in option order.
   await router.handleCallbackQuery(state, tap(`toggle:${questionId}:2`), opts);
@@ -248,6 +249,6 @@ test("toggle and Done callbacks are distinct from a plain question answer", () =
   assert.deepEqual(parseQuestionDoneCallback(questionDoneCallbackData(questionId)), { questionId });
   assert.equal(parseToggleCallback("question:" + questionId + ":1"), undefined);
   const keyboard = toggleKeyboard(questionId, ["a", "b"], [1]);
-  assert.deepEqual(keyboard.inline_keyboard.map((row) => row[0].text), ["a", "✓ b", "Done (1)"]);
+  assert.deepEqual(keyboard.inline_keyboard.map((row) => row[0].text), ["a", "✓ b", "✏️ Type my own answer", "Done (1)"]);
   assert.equal(keyboard.inline_keyboard.at(-1)[0].callback_data, `qdone:${questionId}`);
 });

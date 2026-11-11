@@ -15,7 +15,7 @@ Pi session B  ⇄  Telegram topic "project-b · 5e6f7a8b"
 - **Read rich Markdown.** Replies are sent as Telegram rich messages, so tables, headings, task lists, footnotes, and formulas render natively, as do inline HTML tags such as `<u>`, `<sup>`, `<mark>`, `<br>`, and `<details>`, plus URL and copy buttons. Local images such as `![chart](./chart.png)` inside the session folder are uploaded inline, and live status shows as a thinking block. Bot API servers without rich messages get the classic HTML formatting. Pi is told about these extras and asked to use them sparingly, since the terminal shows them as raw markup.
 - **Reply from anywhere.** Your message reaches that session: it starts a new turn if Pi is idle, or steers the current turn if Pi is busy. Sessions never see each other's messages.
 - **Control the session with buttons.** Each topic has a pinned status card with **Continue**, **Stop**, **Retry**, and **Refresh status** buttons.
-- **Answer Pi's questions.** When Pi asks a multiple-choice question, you get tap-to-answer buttons.
+- **Answer Pi's questions.** When Pi asks a multiple-choice question, you get tap-to-answer buttons, or you can type your own answer.
 - **Exchange files.** Send Pi a photo or document; Pi can send reports, archives, and images back.
 - **Use interactive widgets.** Pi can send small HTML, CSS, and JavaScript widgets (polls, games, dashboards) that run right inside the chat (Telegram 13.2+).
 - **Run Pi commands.** Your Pi extension commands, prompt templates, and skills appear in Telegram's `/` menu.
@@ -70,7 +70,7 @@ Start Pi as usual. The first time a session sends something (a finished answer, 
 
 ### Questions
 
-Pi can use the `telegram_ask_user_question` tool to ask you a question with answer buttons, and it waits for your tap. With its optional `widget` argument the question is drawn as an interactive widget instead of text, and your options sit as buttons right under it — handy when the answer needs a chart, a diff or a comparison. With `multiSelect` the buttons become checkboxes: each tap ticks or unticks an option, and nothing is sent back until you press **Done**, so one question covers several answers. Questions Pi asks in the terminal (`ask_user_question`) still show up as a notification, but you answer them at the computer.
+Pi can use the `telegram_ask_user_question` tool to ask you a question with answer buttons, and it waits for your tap. With its optional `widget` argument the question is drawn as an interactive widget instead of text, and your options sit as buttons right under it — handy when the answer needs a chart, a diff or a comparison. With `multiSelect` the buttons become checkboxes: each tap ticks or unticks an option, and nothing is sent back until you press **Done**, so one question covers several answers. None of the options fit? Tap **✏️ Type my own answer** and send your answer as a message in the topic; with `multiSelect` it is added to the options you ticked. If Pi stops waiting (for example, you stop its turn), the buttons disappear and your next message goes to Pi as usual. Questions Pi asks in the terminal (`ask_user_question`) still show up as a notification, but you answer them at the computer.
 
 ### Widgets
 

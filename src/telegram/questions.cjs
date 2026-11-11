@@ -29,6 +29,19 @@ function parseQuestionDoneCallback(value) {
   return match ? { questionId: match[1] } : undefined;
 }
 
+// Every question also offers a typed answer: after this tap, the next text message in the topic
+// answers the question instead of starting a turn.
+function customCallbackData(questionId) {
+  return `qcustom:${questionId}`;
+}
+
+function parseQuestionCustomCallback(value) {
+  const match = String(value || "").match(/^qcustom:([0-9a-f-]{36})$/i);
+  return match ? { questionId: match[1] } : undefined;
+}
+
+const customRow = (questionId) => [{ text: "✏️ Type my own answer", callback_data: customCallbackData(questionId) }];
+
 // Telegram drops a button label past 64 characters and refuses an empty one.
 function buttonText(option, selected) {
   const text = String(option).slice(0, 62);
@@ -37,14 +50,18 @@ function buttonText(option, selected) {
 
 function questionKeyboard(questionId, options) {
   return {
-    inline_keyboard: options.map((option, index) => [{
-      text: buttonText(option, false),
-      callback_data: questionCallbackData(questionId, index),
-    }]),
+    inline_keyboard: [
+      ...options.map((option, index) => [{
+        text: buttonText(option, false),
+        callback_data: questionCallbackData(questionId, index),
+      }]),
+      customRow(questionId),
+    ],
   };
 }
 
-// Multi-select: every option toggles, and nothing is sent to Pi until Done. The keyboard is
+// Multi-select: every option toggles, and nothing is sent to Pi until Done or a typed answer,
+// which joins the ticked options. The keyboard is
 // redrawn on each toggle so the checkmarks are the state; Telegram edits the same message rather
 // than posting new ones, which keeps a long checklist out of the chat history.
 function toggleKeyboard(questionId, options, selected = []) {
@@ -53,6 +70,7 @@ function toggleKeyboard(questionId, options, selected = []) {
     text: buttonText(option, chosen.has(index)),
     callback_data: toggleCallbackData(questionId, index),
   }]);
+  rows.push(customRow(questionId));
   rows.push([{
     text: chosen.size ? `Done (${chosen.size})` : "Done",
     callback_data: questionDoneCallbackData(questionId),
@@ -72,6 +90,7 @@ function widgetQuestionKeyboard(questionId, options) {
       callback_data: questionCallbackData(questionId, index + offset),
     })));
   }
+  rows.push(customRow(questionId));
   return { inline_keyboard: rows };
 }
 
@@ -97,7 +116,9 @@ function widgetQuestionCaption(question, options) {
 
 module.exports = Object.freeze({
   answeredKeyboard,
+  customCallbackData,
   parseQuestionCallback,
+  parseQuestionCustomCallback,
   parseQuestionDoneCallback,
   parseToggleCallback,
   questionCallbackData,
