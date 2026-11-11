@@ -61,6 +61,14 @@ test("rebuilds safe buttons canonically and disables the rest", () => {
     prepareRichMarkdown('<tg-button type="url" url="javascript:alert(1)">x</tg-button>'),
     '<tg-button type="disabled">x</tg-button>',
   );
+  // Button URLs are HTTP or tg:// only; mail and phone links stay valid as inline links.
+  for (const url of ["mailto:a@b.io", "tel:+123456789"]) {
+    assert.equal(prepareRichMarkdown(`<tg-button type="url" url="${url}">x</tg-button>`), '<tg-button type="disabled">x</tg-button>');
+  }
+  assert.equal(
+    prepareRichMarkdown('<tg-button type="url" url="tg://user?id=777000">x</tg-button>'),
+    '<tg-button type="url" url="tg://user?id=777000">x</tg-button>',
+  );
 });
 
 test("drafts replace local images and status becomes a thinking block", () => {

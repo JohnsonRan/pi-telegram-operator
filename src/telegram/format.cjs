@@ -21,7 +21,9 @@ function canonicalButton(attributes) {
   }
   const style = BUTTON_STYLES.has(parsed.get("style")) ? ` style="${parsed.get("style")}"` : "";
   if (parsed.get("type") === "url") {
-    const url = safeUrl(parsed.get("url"));
+    // Buttons take only HTTP and tg:// URLs; a mailto: or tel: one makes Telegram reject the message.
+    const raw = String(parsed.get("url") ?? "").trim();
+    const url = /^(?:https?|tg):/i.test(raw) ? safeUrl(raw) : undefined;
     return url ? `<tg-button type="url"${style} url="${url}">` : '<tg-button type="disabled">';
   }
   if (parsed.get("type") === "copy_text") {
