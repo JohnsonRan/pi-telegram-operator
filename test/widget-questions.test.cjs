@@ -122,6 +122,10 @@ test("a widget question keeps the caption readable and its keyboard within ten o
   assert.deepEqual(keyboard.inline_keyboard.map((row) => row.length), [2, 2, 2, 2, 2]);
   assert.deepEqual(parseQuestionCallback(keyboard.inline_keyboard[4][1].callback_data), { questionId, optionIndex: 9 });
   assert.match(widgetQuestionCaption("Pick one", options), /\n\n1\. a[\s\S]*\n10\. j$/);
+  // sendWidget refuses captions over 1024 characters; the question gives way to the options.
+  const long = widgetQuestionCaption("q".repeat(3000), options);
+  assert.equal(long.length, 1024);
+  assert.match(long, /q…\n\n1\. a[\s\S]*\n10\. j$/);
 });
 
 test("an answered widget question swaps its options for one inert answer button", async (t) => {

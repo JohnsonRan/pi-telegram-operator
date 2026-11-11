@@ -81,11 +81,18 @@ function answeredKeyboard(answer) {
   return { inline_keyboard: [[{ text: buttonText(answer, true), disabled: {} }]] };
 }
 
+// sendWidget refuses a caption over 1024 characters, which would fail the whole question.
+const WIDGET_CAPTION_LIMIT = 1024;
+
 // The caption is the widget's fallback (chat list, forwards, clients without widgets), so it
-// repeats the options; the buttons below the widget stay tappable either way.
+// repeats the options; the buttons below the widget stay tappable either way. The question is
+// shortened first so the option list survives.
 function widgetQuestionCaption(question, options) {
   const list = options.map((option, index) => `${index + 1}. ${option}`).join("\n");
-  return `${String(question).slice(0, 2800)}\n\n${list}`;
+  const text = String(question);
+  const room = WIDGET_CAPTION_LIMIT - list.length - 2;
+  const head = text.length > room ? `${text.slice(0, Math.max(0, room - 1))}…` : text;
+  return `${head}\n\n${list}`.slice(0, WIDGET_CAPTION_LIMIT);
 }
 
 module.exports = Object.freeze({
